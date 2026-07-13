@@ -1,1514 +1,198 @@
 {% load static %}
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Intelligere &middot; Ledger AI Assistant</title>
-<script>
-  // Applied before first paint so the page never flashes the wrong theme.
-  (function () {
-    var saved = localStorage.getItem('ledger-theme');
-    var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    document.documentElement.dataset.theme = theme;
-  })();
-</script>
-<style>
-  :root {
-    --blue: #2f6fed;
-    --blue-dark: #1d4ed8;
-    --blue-bg: #eaf1ff;
-    --bubble-bg: #ffffff;
-    --page-bg: #f3f5fa;
-    --sidebar-bg: #ffffff;
-    --header-bg: #ffffff;
-    --composer-bg: #f3f5fa;
-    --composer-input-bg: #eef1f8;
-    --text: #16213e;
-    --muted: #6b7590;
-    --border: #e7eaf3;
-    --pebble-bg: #ffffff;
-    --pebble-border: #dde3f0;
-    --pebble-text: #33415c;
-    --shadow: 0 1px 2px rgba(20, 30, 60, 0.06);
-  }
-  :root[data-theme="dark"] {
-    --blue: #5b93ff;
-    --blue-dark: #7fa9ff;
-    --blue-bg: rgba(91, 147, 255, 0.16);
-    --bubble-bg: #141a30;
-    --page-bg: #090d1c;
-    --sidebar-bg: #0d1224;
-    --header-bg: #0d1224;
-    --composer-bg: #090d1c;
-    --composer-input-bg: #141a30;
-    --text: #e7ebf7;
-    --muted: #8b93b0;
-    --border: #232a45;
-    --pebble-bg: transparent;
-    --pebble-border: #2c3454;
-    --pebble-text: #dfe4f4;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: var(--page-bg);
-    color: var(--text);
-    display: flex;
-    flex-direction: row;
-    height: 100vh;
-    transition: background 0.15s ease, color 0.15s ease;
-  }
-
-  /* Left sidebar: module navigation */
-  .module-sidebar {
-    width: 250px;
-    min-width: 250px;
-    background: var(--sidebar-bg);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    padding: 22px 0;
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-  .sidebar-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 22px 26px;
-  }
-  .sidebar-logo-badge {
-    width: 38px; height: 38px;
-    min-width: 38px;
-    border-radius: 10px;
-    overflow: hidden;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--blue-bg);
-  }
-  .sidebar-logo-badge img { width: 100%; height: 100%; object-fit: cover; }
-  .sidebar-title .brand {
-    font-weight: 800;
-    color: var(--blue-dark);
-    font-size: 18px;
-    line-height: 1.2;
-  }
-  .sidebar-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 0 14px;
-    flex: 1;
-  }
-  .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    border: none;
-    background: transparent;
-    text-align: left;
-    width: 100%;
-    padding: 11px 14px;
-    border-radius: 10px;
-    font-size: 14.5px;
-    font-weight: 600;
-    color: var(--muted);
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-  }
-  .nav-item svg { flex: none; stroke: currentColor; }
-  .nav-item:hover { background: var(--blue-bg); color: var(--text); }
-  .nav-item.active {
-    background: var(--blue-bg);
-    color: var(--blue-dark);
-  }
-
-  .main-column {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-  }
-
-  header.topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 24px;
-    background: var(--header-bg);
-    border-bottom: 1px solid var(--border);
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-  header.topbar .topbar-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  header.topbar .avatar {
-    width: 40px; height: 40px;
-    min-width: 40px;
-    border-radius: 12px;
-    overflow: hidden;
-    background: var(--blue-bg);
-    display: flex; align-items: center; justify-content: center;
-  }
-  header.topbar .avatar img { width: 100%; height: 100%; object-fit: cover; }
-  header.topbar .titles h1 {
-    margin: 0;
-    font-size: 17px;
-    font-weight: 700;
-  }
-  .theme-toggle-btn {
-    width: 38px; height: 38px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: var(--pebble-bg);
-    color: var(--text);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-  }
-  .theme-toggle-btn:hover { background: var(--blue-bg); }
-  .theme-toggle-btn svg { stroke: currentColor; }
-
-  main.chat {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .row { display: flex; gap: 12px; align-items: flex-start; }
-  .row .avatar {
-    width: 34px; height: 34px; min-width: 34px;
-    border-radius: 10px;
-    overflow: hidden;
-    background: var(--blue-bg);
-    display: flex; align-items: center; justify-content: center;
-  }
-  .row .avatar img { width: 100%; height: 100%; object-fit: cover; }
-  .bubble {
-    position: relative;
-    background: var(--bubble-bg);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 14px 18px;
-    max-width: 640px;
-    line-height: 1.5;
-    font-size: 14.5px;
-    box-shadow: var(--shadow);
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-  .bubble b, .bubble strong { color: var(--blue-dark); }
-  .bubble.has-export { padding-right: 90px; }
-
-  .export-btn {
-    position: absolute;
-    top: 10px;
-    right: 12px;
-    border: 1px solid var(--border);
-    background: var(--pebble-bg);
-    color: var(--blue-dark);
-    font-size: 11px;
-    font-weight: 600;
-    padding: 4px 10px;
-    border-radius: 999px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .export-btn:hover { background: var(--blue-bg); }
-
-  .pebbles-bar {
-    background: var(--header-bg);
-    border-top: 1px solid var(--border);
-    padding: 12px 24px;
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-  .pebbles {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  .pebble {
-    border: 1px solid var(--pebble-border);
-    background: var(--pebble-bg);
-    color: var(--pebble-text);
-    font-weight: 600;
-    font-size: 13.5px;
-    padding: 10px 18px;
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
-  }
-  .pebble:hover { background: var(--blue-bg); border-color: var(--blue); }
-  .pebble:active { transform: scale(0.97); }
-  .pebble.active { background: var(--blue); border-color: var(--blue); color: #fff; }
-  .pebble.reset { color: var(--muted); }
-  .pebble.reset:hover { background: var(--border); border-color: var(--pebble-border); }
-
-  .data-table-wrap {
-    max-width: 100%;
-  }
-  .data-table-wrap .table-scroll {
-    overflow-x: auto;
-  }
-  .table-controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-  .page-size-label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .page-size-select {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 6px;
-    font-size: 12.5px;
-    color: var(--text);
-    background: var(--composer-input-bg);
-  }
-  .date-filter-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 8px;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-  .date-filter-controls label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .date-filter-controls input[type="date"],
-  .date-filter-controls select {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 6px;
-    font-size: 12.5px;
-    color: var(--text);
-    background: var(--composer-input-bg);
-  }
-  table.data-table {
-    border-collapse: collapse;
-    width: 100%;
-    font-size: 13px;
-    min-width: 560px;
-  }
-  table.data-table th, table.data-table td {
-    text-align: left;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-  }
-  table.data-table th {
-    color: var(--muted);
-    font-weight: 600;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-  .status-pill {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 999px;
-    font-size: 11.5px;
-    font-weight: 600;
-  }
-  .status-pill.overdue { background: #fde2e2; color: #c23b3b; }
-  .status-pill.due_today { background: #fff2cc; color: #9a7300; }
-  .status-pill.upcoming { background: #e1f4e6; color: #21874b; }
-  .status-pill.dead_stock { background: var(--border); color: var(--muted); }
-  .status-pill.fast_moving { background: var(--blue-bg); color: var(--blue-dark); }
-  .status-pill.overstock { background: #ffe8d6; color: #b5651d; }
-
-  table.info-card {
-    border-collapse: collapse;
-    width: 100%;
-    max-width: 420px;
-    font-size: 13px;
-  }
-  table.info-card td {
-    padding: 6px 4px;
-    border-bottom: 1px solid var(--border);
-  }
-  table.info-card td:first-child {
-    color: var(--muted);
-    font-weight: 600;
-    width: 40%;
-    white-space: nowrap;
-  }
-  .info-summary-line {
-    margin-top: 10px;
-    font-size: 13.5px;
-  }
-
-  .credit-bar-track {
-    margin-top: 10px;
-    height: 8px;
-    border-radius: 999px;
-    background: var(--border);
-    overflow: hidden;
-    max-width: 420px;
-  }
-  .credit-bar-fill {
-    height: 100%;
-    border-radius: 999px;
-    transition: width 0.2s ease;
-  }
-
-  .loading-dots span {
-    display: inline-block;
-    width: 6px; height: 6px;
-    margin-right: 3px;
-    border-radius: 50%;
-    background: var(--muted);
-    animation: blink 1.2s infinite;
-  }
-  .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
-  .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
-
-  footer.composer {
-    padding: 16px 24px;
-    background: var(--composer-bg);
-    display: flex;
-    gap: 12px;
-    transition: background 0.15s ease;
-  }
-  footer.composer input {
-    flex: 1;
-    border: 1px solid var(--border);
-    outline: none;
-    border-radius: 999px;
-    padding: 14px 20px;
-    font-size: 14px;
-    background: var(--composer-input-bg);
-    color: var(--text);
-  }
-  footer.composer input::placeholder { color: var(--muted); }
-  footer.composer button {
-    width: 46px; height: 46px;
-    border-radius: 50%;
-    border: none;
-    background: var(--blue);
-    color: #fff;
-    font-size: 16px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-  }
-  footer.composer button:hover { background: var(--blue-dark); }
-</style>
-</head>
-<body>
-
-<nav class="module-sidebar">
-  <div class="sidebar-header">
-    <div class="sidebar-logo-badge"><img src="{% static 'ledger/logo.jpeg' %}" alt="Intelligere"></div>
-    <div class="sidebar-title">
-      <div class="brand">Intelligere</div>
-    </div>
-  </div>
-  <div class="sidebar-nav" id="module-nav">
-    <button class="nav-item active" data-module="outstanding_invoices">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
-      Outstanding Invoices
-    </button>
-    <button class="nav-item" data-module="order_book">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-      Order Book
-    </button>
-    <button class="nav-item" data-module="inventory">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-      Inventory
-    </button>
-  </div>
-</nav>
-
-<div class="main-column">
-  <header class="topbar">
-    <div class="topbar-left">
-      <div class="avatar"><img src="{% static 'ledger/logo.jpeg' %}" alt="Intelligere"></div>
-      <div class="titles">
-        <h1>Outstanding Invoices</h1>
-      </div>
-    </div>
-    <button id="theme-toggle" class="theme-toggle-btn" type="button" aria-label="Toggle light/dark theme">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-    </button>
-  </header>
-
-  <main class="chat" id="chat">
-    <div class="row">
-      <div class="avatar"><img src="{% static 'ledger/logo.jpeg' %}" alt="bot"></div>
-      <div class="bubble">
-        👋 Hi! I'm your <b>Ledger AI Assistant</b>. I'm currently tracking <b>{{ ledger_count }}</b> active ledgers.
-        Pick a module on the left, click a pebble below, or just type a question to get started.
-      </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Intelligere</title>
+    <script>
+      // Applied before first paint so the page never flashes the wrong theme.
+      (function () {
+        var saved = localStorage.getItem('ledger-theme');
+        var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{% static 'ledger/css/style.css' %}" />
+    <link rel="stylesheet" href="{% static 'ledger/css/responsive.css' %}" />
+  </head>
+  <body>
+    <div class="app">
+      <div class="sidebar-overlay" id="sidebarOverlay"></div>
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <div class="brand-mark">
+            <img
+              src="{% static 'ledger/logo.jpeg' %}"
+              alt="Logo"
+              class="brand-logo"
+              onerror="this.style.display = 'none'"
+            />
+          </div>
+          <div>
+            <div class="brand-name">
+              <span style="color: var(--accent-2)">Intelligere</span>
+            </div>
+          </div>
+        </div>
+        <nav class="modules">
+          <button class="module active" data-module="outstanding">
+            <span class="m-icon"
+              ><svg
+                stroke="currentColor"
+                fill="none"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                height="1em"
+                width="1em"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                ></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline></svg></span
+            ><span>Outstanding Invoices</span>
+          </button>
+          <button class="module" data-module="orders">
+            <span class="m-icon"
+              ><svg
+                stroke="currentColor"
+                fill="none"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                height="1em"
+                width="1em"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line>
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+                ></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span
+            ><span>Order Book</span>
+          </button>
+          <button class="module" data-module="inventory">
+            <span class="m-icon"
+              ><svg
+                stroke="currentColor"
+                fill="none"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                height="1em"
+                width="1em"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <line x1="18" y1="20" x2="18" y2="10"></line>
+                <line x1="12" y1="20" x2="12" y2="4"></line>
+                <line x1="6" y1="20" x2="6" y2="14"></line></svg></span
+            ><span>Inventory</span>
+          </button>
+          <div class="sidebar-most-used" id="sidebarMostUsed"></div>
+        </nav>
+      </aside>
+      <main class="chat">
+        <div class="chat-header">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <div class="avatar">
+            <img
+              src="{% static 'ledger/logo.jpeg' %}"
+              alt="Logo"
+              style="
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                border-radius: 10px;
+              "
+            />
+          </div>
+          <div>
+            <div class="chat-title" id="chatTitle">Outstanding Invoices</div>
+          </div>
+          <button
+            class="theme-toggle"
+            id="themeToggle"
+            type="button"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="chat-body" id="chatBody"></div>
+        <div class="chat-input-wrapper">
+          <div class="chat-input-bar">
+            <input
+              id="chatInput"
+              type="text"
+              placeholder="Ask me anything..."
+              autocomplete="off"
+            />
+            <button class="send-btn" id="sendBtn">
+              <svg
+                stroke="currentColor"
+                fill="currentColor"
+                stroke-width="0"
+                viewBox="0 0 512 512"
+                height="1em"
+                width="1em"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M48 448l416-192L48 64v149.333L346 256 48 298.667z"
+                ></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </main>
     </div>
 
-    <div class="row">
-      <div class="avatar"><img src="{% static 'ledger/logo.jpeg' %}" alt="bot"></div>
-      <div class="bubble">Let's start with <b>Outstanding Invoices</b>. What would you like to see?</div>
-    </div>
-  </main>
-
-  {{ pebbles|json_script:"pebbles-data" }}
-
-  <div class="pebbles-bar">
-    <div class="pebbles" id="pebbles">
-      {% for p in pebbles %}
-        <button class="pebble" data-key="{{ p.key }}">{{ p.label }}</button>
-      {% endfor %}
-    </div>
-  </div>
-
-  <footer class="composer">
-    <input type="text" id="composer-input" placeholder="Ask me anything about your ledgers...">
-    <button id="composer-send" aria-label="Send">&#9658;</button>
-  </footer>
-</div>
-
-{# Renders a hidden csrftoken input purely so Django sets the csrftoken cookie on load; #}
-{# the export-to-PDF fetch reads that cookie to authenticate its POST. #}
-<form style="display:none">{% csrf_token %}</form>
-
-<script>
-const chat = document.getElementById('chat');
-const pebblesBar = document.getElementById('pebbles');
-const input = document.getElementById('composer-input');
-const sendBtn = document.getElementById('composer-send');
-const moduleNav = document.getElementById('module-nav');
-const topbarTitle = document.querySelector('header.topbar .titles h1');
-
-const QUERY_URL = "{% url 'ledger:query_api' %}";
-const SEARCH_URL = "{% url 'ledger:ledger_search_api' %}";
-const DETAIL_URL = "{% url 'ledger:ledger_detail_api' %}";
-const AGING_URL = "{% url 'ledger:ledger_aging_api' %}";
-const TRANSACTIONS_URL = "{% url 'ledger:ledger_transactions_api' %}";
-const ORDER_QUERY_URL = "{% url 'ledger:order_query_api' %}";
-const INVENTORY_QUERY_URL = "{% url 'ledger:inventory_query_api' %}";
-const ITEM_SEARCH_URL = "{% url 'ledger:stock_item_search_api' %}";
-const EXPORT_PDF_URL = "{% url 'ledger:export_pdf_api' %}";
-const LOGO_URL = "{% static 'ledger/logo.jpeg' %}";
-
-const OUTSTANDING_STATIC_PEBBLES = JSON.parse(document.getElementById('pebbles-data').textContent);
-
-const OUTSTANDING_DYNAMIC_PEBBLES = [
-  { key: 'all', label: 'Outstanding Invoices' },
-  { key: 'overdue', label: 'Overdue Only' },
-  { key: 'due_this_week', label: 'Due This Week' },
-  { key: 'high_value', label: 'High Value' },
-  { key: 'info', label: 'Contact & Credit Info' },
-  { key: 'aging', label: 'Aging Summary' },
-  { key: 'credit_status', label: 'Credit Limit Status' },
-  { key: 'transactions', label: 'Full Transaction History' },
-  { key: 'paid', label: 'Payment History' },
-  { key: 'reset', label: 'All Companies' },
-];
-
-const OUTSTANDING_FILTER_PATTERNS = [
-  { key: 'due_this_week', source: '\\b(due\\s+this\\s+week|due\\s+in\\s+a\\s+week|this\\s+week)\\b' },
-  { key: 'overdue', source: '\\b(overdue|past\\s+due|late)\\b' },
-  { key: 'high_value', source: '\\bhigh[- ]value\\b' },
-  { key: 'aging', source: '\\baging\\b' },
-  { key: 'credit_status', source: '\\b(credit\\s+status|credit\\s+utilization|over\\s+limit|near\\s+limit)\\b' },
-  { key: 'transactions', source: '\\b(transaction\\s+history|all\\s+transactions|full\\s+ledger|statement)\\b' },
-  { key: 'paid', source: '\\b(payment\\s+history|paid\\s+invoices|settled|reconciled)\\b' },
-  { key: 'info', source: '\\b(contact\\s+(info|details)|credit\\s+(info|details|limit)|balance|gstin)\\b' },
-  { key: 'customer', source: '\\bcustomers?\\b' },
-  { key: 'supplier', source: '\\b(suppliers?|vendors?)\\b' },
-  { key: 'reset', source: '\\b(all\\s+companies|start\\s+over|reset)\\b' },
-  { key: 'all', source: '\\b(all\\s+outstanding|outstanding\\s+invoices|outstanding)\\b' },
-];
-
-const ORDER_STATIC_PEBBLES = [
-  { key: 'sales_orders', label: 'Sales Orders' },
-  { key: 'purchase_orders', label: 'Purchase Orders' },
-  { key: 'open_orders', label: 'Open Orders' },
-  { key: 'pending_dispatch', label: 'Pending Dispatch' },
-  { key: 'pending_procurement', label: 'Pending Procurement' },
-];
-
-const ORDER_DYNAMIC_PEBBLES = [
-  { key: 'all', label: 'All Orders' },
-  { key: 'sales_orders', label: 'Sales Orders' },
-  { key: 'purchase_orders', label: 'Purchase Orders' },
-  { key: 'open_orders', label: 'Open Orders' },
-  { key: 'pending_dispatch', label: 'Pending Dispatch' },
-  { key: 'pending_procurement', label: 'Pending Procurement' },
-  { key: 'info', label: 'Contact & Credit Info' },
-  { key: 'reset', label: 'All Companies' },
-];
-
-const ORDER_FILTER_PATTERNS = [
-  { key: 'pending_dispatch', source: '\\bpending\\s+dispatch\\b' },
-  { key: 'pending_procurement', source: '\\bpending\\s+procurement\\b' },
-  { key: 'open_orders', source: '\\bopen\\s+orders?\\b' },
-  { key: 'sales_orders', source: '\\bsales?\\s+orders?\\b' },
-  { key: 'purchase_orders', source: '\\bpurchase\\s+orders?\\b' },
-  { key: 'info', source: '\\b(contact\\s+(info|details)|credit\\s+(info|details|limit)|balance|gstin)\\b' },
-  { key: 'reset', source: '\\b(all\\s+companies|start\\s+over|reset)\\b' },
-];
-
-const INVENTORY_STATIC_PEBBLES = [
-  { key: 'low_stock', label: 'Low Stock' },
-  { key: 'dead_stock', label: 'Dead Stock' },
-  { key: 'fast_moving', label: 'Fast Moving' },
-  { key: 'negative_stock', label: 'Negative Stock' },
-  { key: 'overstock', label: 'Overstock' },
-];
-
-const INVENTORY_DYNAMIC_PEBBLES = [
-  { key: 'all', label: 'All Stock Items' },
-  { key: 'low_stock', label: 'Low Stock' },
-  { key: 'dead_stock', label: 'Dead Stock' },
-  { key: 'fast_moving', label: 'Fast Moving' },
-  { key: 'negative_stock', label: 'Negative Stock' },
-  { key: 'overstock', label: 'Overstock' },
-  { key: 'info', label: 'Contact & Credit Info' },
-  { key: 'reset', label: 'All Vendors' },
-];
-
-const INVENTORY_FILTER_PATTERNS = [
-  { key: 'negative_stock', source: '\\bnegative\\s+stock\\b' },
-  { key: 'low_stock', source: '\\blow\\s+stock\\b' },
-  { key: 'dead_stock', source: '\\bdead\\s+stock\\b' },
-  { key: 'fast_moving', source: '\\bfast[- ]moving\\b' },
-  { key: 'overstock', source: '\\bover[- ]?stock\\b' },
-  { key: 'info', source: '\\b(contact\\s+(info|details)|credit\\s+(info|details|limit)|balance|gstin)\\b' },
-  { key: 'reset', source: '\\b(all\\s+(companies|vendors)|start\\s+over|reset)\\b' },
-];
-
-// Filler words/phrases that carry no filtering meaning — stripped out so that
-// whatever remains of a free-text sentence can be tried as a company name.
-// Longest phrases are matched first so they win over their sub-words. Shared
-// across all modules since these are generically conversational, not
-// module-specific.
-const FILLER_PHRASES = [
-  'can you show me', 'can you give me', 'could you give me', 'could you show me',
-  'i want to know', 'i would like to see', 'i would like', "i'd like",
-  'give me', 'show me', 'tell me', 'let me see', 'look up', 'lookup', 'search for',
-  'get me', 'find me',
-  'please', 'the', 'a', 'an', 'on', 'of', 'about', 'for', 'regarding', 'me',
-  'what', 'is', 'are', 'their', 'that', 'this', 'to', 'and', 'with', 'near',
-  'company', 'companies', 'ledger', 'ledgers', 'information', 'info', 'details', 'detail',
-  'invoice', 'invoices', 'outstanding', 'display', 'find', 'get', 'show',
-  'history', 'status', 'summary', 'utilization', 'statement', 'transaction', 'transactions',
-  'order', 'orders', 'dispatch', 'procurement', 'stock', 'items', 'item', 'vendor', 'vendors',
-].sort((a, b) => b.length - a.length);
-
-function stripFillerWords(text) {
-  let result = ` ${text} `;
-  for (const phrase of FILLER_PHRASES) {
-    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    result = result.replace(new RegExp(`\\b${escaped}\\b`, 'g'), ' ');
-  }
-  return result.replace(/\s+/g, ' ').trim();
-}
-
-function extractIntent(text, filterPatterns) {
-  let working = ` ${text.toLowerCase()} `;
-  let filterKey = null;
-
-  for (const { key, source } of filterPatterns) {
-    const re = new RegExp(source);
-    if (re.test(working)) {
-      filterKey = key;
-      working = working.replace(new RegExp(source, 'g'), ' ');
-      break;
-    }
-  }
-
-  return { filterKey, companyQuery: stripFillerWords(working) };
-}
-
-// Company currently "in focus" — { id, name } or null when browsing globally.
-let currentLedger = null;
-// A filter to apply as soon as a pending company-name disambiguation is resolved.
-let pendingFilterKey = null;
-// Which module's chat context is active.
-let currentModuleKey = 'outstanding_invoices';
-
-function scrollToBottom() {
-  chat.scrollTop = chat.scrollHeight;
-}
-
-function addUserRow(text) {
-  const row = document.createElement('div');
-  row.className = 'row';
-  row.style.justifyContent = 'flex-end';
-  row.innerHTML = `<div class="bubble" style="background:#ded9fb;">${escapeHtml(text)}</div>`;
-  chat.appendChild(row);
-  scrollToBottom();
-}
-
-function addBotLoading() {
-  const row = document.createElement('div');
-  row.className = 'row bot-loading';
-  row.innerHTML = `
-    <div class="avatar"><img src="${LOGO_URL}" alt="bot"></div>
-    <div class="bubble loading-dots"><span></span><span></span><span></span></div>
-  `;
-  chat.appendChild(row);
-  scrollToBottom();
-  return row;
-}
-
-function addBotBubble(html) {
-  const row = document.createElement('div');
-  row.className = 'row';
-  row.innerHTML = `<div class="avatar"><img src="${LOGO_URL}" alt="bot"></div><div class="bubble">${html}</div>`;
-  chat.appendChild(row);
-  scrollToBottom();
-  return row;
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function renderMarkdownLite(text) {
-  return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-}
-
-function fmtMoney(n) {
-  return `₹${Number(n).toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
-}
-
-const EXPORT_BTN_HTML = '<button class="export-btn" type="button">&#8595; PDF</button>';
-
-// Append the export button to a bubble's content and mark the bubble so the
-// print stylesheet knows to leave it padding-room. Pass `content = ''`
-// (falsy) for plain-text responses with no table/card — no button is shown.
-function withExportButton(bubbleEl, html, exportable) {
-  bubbleEl.innerHTML = exportable ? `${html}${EXPORT_BTN_HTML}` : html;
-  bubbleEl.classList.toggle('has-export', !!exportable);
-}
-
-const EXPORT_DOC_STYLES = `
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 28px; color: #1f2033; }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e3e4f3; }
-  th { text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; color: #6b6f8a; }
-  b, strong { color: #5b4bd1; }
-  .export-btn, .page-size-label, .date-filter-controls, .table-count { display: none; }
-  .status-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-  .status-pill.overdue { background: #fde2e2; color: #c23b3b; }
-  .status-pill.due_today, .status-pill.low_stock { background: #fff2cc; color: #9a7300; }
-  .status-pill.upcoming, .status-pill.normal { background: #e1f4e6; color: #21874b; }
-  .status-pill.dead_stock { background: #eceefb; color: #6b6f8a; }
-  .status-pill.fast_moving { background: #e6e1fb; color: #5b4bd1; }
-  .status-pill.overstock { background: #ffe8d6; color: #b5651d; }
-  .info-summary-line { margin-top: 10px; }
-`;
-
-function getCsrfToken() {
-  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : '';
-}
-
-function slugify(text) {
-  return (
-    text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '').slice(0, 60)
-    || 'ledger-export'
-  );
-}
-
-// Builds a standalone HTML document from one bubble's content (same
-// print-ready markup as before), then converts it to a real PDF server-side
-// via /api/export-pdf/ (xhtml2pdf) and downloads the returned PDF bytes.
-// Doesn't rely on window.print()/popups at all, so it works even inside
-// sandboxed embedded browsers (e.g. VS Code's Simple Browser).
-async function exportBubbleAsPDF(bubbleEl) {
-  const clone = bubbleEl.cloneNode(true);
-  clone.querySelectorAll('.export-btn, .page-size-label, .date-filter-controls').forEach(el => el.remove());
-  const title = clone.textContent.trim().slice(0, 60) || 'Ledger Export';
-
-  const doc = `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title>
-<style>${EXPORT_DOC_STYLES}</style>
-</head><body>${clone.innerHTML}</body></html>`;
-
-  const filename = `${slugify(title)}.pdf`;
-  const btn = bubbleEl.querySelector('.export-btn');
-  const originalLabel = btn ? btn.innerHTML : null;
-  if (btn) { btn.disabled = true; btn.innerHTML = '…'; }
-
-  try {
-    const res = await fetch(EXPORT_PDF_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
-      body: JSON.stringify({ html: doc, filename }),
-    });
-    if (!res.ok) throw new Error(`export failed: ${res.status}`);
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-  } catch (err) {
-    addBotBubble(renderMarkdownLite('Something went wrong generating that PDF. Please try again.'));
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
-  }
-}
-
-chat.addEventListener('click', (e) => {
-  const btn = e.target.closest('.export-btn');
-  if (!btn) return;
-  const bubble = btn.closest('.bubble');
-  if (bubble) exportBubbleAsPDF(bubble);
-});
-
-const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
-const DEFAULT_PAGE_SIZE = 10;
-let tableSeq = 0;
-const tableStore = {};
-
-function renderInvoiceRows(invoices) {
-  return invoices.map(inv => `
-    <tr>
-      <td>${inv.voucher_no}</td>
-      <td>${inv.type}</td>
-      <td>${inv.party}</td>
-      <td>${inv.date}</td>
-      <td>${inv.due_date || '—'}</td>
-      <td>${fmtMoney(inv.amount)}</td>
-      <td><span class="status-pill ${inv.status}">${inv.status_label}</span></td>
-    </tr>
-  `).join('');
-}
-
-function renderTransactionRows(entries) {
-  return entries.map(e => `
-    <tr>
-      <td>${e.date}</td>
-      <td>${e.voucher_type}</td>
-      <td>${e.voucher_no}</td>
-      <td>${e.debit_amount ? fmtMoney(e.debit_amount) : '—'}</td>
-      <td>${e.credit_amount ? fmtMoney(e.credit_amount) : '—'}</td>
-      <td><span class="status-pill ${e.is_reconciled ? 'upcoming' : 'overdue'}">${e.is_reconciled ? 'Reconciled' : 'Open'}</span></td>
-    </tr>
-  `).join('');
-}
-
-function renderOrderRows(orders) {
-  return orders.map(o => `
-    <tr>
-      <td>${o.order_no}</td>
-      <td>${o.order_type}</td>
-      <td>${o.party}</td>
-      <td>${o.order_date}</td>
-      <td>${o.target_date || '—'}</td>
-      <td>${fmtMoney(o.value)}</td>
-      <td>${fmtMoney(o.pending_value)}</td>
-      <td><span class="status-pill ${o.is_complete ? 'upcoming' : 'due_today'}">${o.status_label}</span></td>
-    </tr>
-  `).join('');
-}
-
-function renderStockRows(items) {
-  return items.map(s => `
-    <tr>
-      <td>${s.name}</td>
-      <td>${s.unit}</td>
-      <td>${s.stock_qty}</td>
-      <td>${s.reorder_level}</td>
-      <td>${s.monthly_consumption}</td>
-      <td>${s.last_movement_date || '—'}</td>
-      <td>${s.preferred_vendor || '—'}</td>
-      <td><span class="status-pill ${s.status}">${s.status_label}</span></td>
-    </tr>
-  `).join('');
-}
-
-// Applies a table's current from/to date filter and sort direction (both
-// optional — only tables with a dateField get the date controls at all) to
-// its full row set. Dates are ISO "YYYY-MM-DD" strings, which sort correctly
-// with plain string comparison, and match <input type="date"> values exactly.
-function computeTableRows(entry) {
-  if (!entry.dateField) return entry.rows;
-
-  let rows = entry.rows;
-  if (entry.fromDate) {
-    rows = rows.filter(r => r[entry.dateField] && r[entry.dateField] >= entry.fromDate);
-  }
-  if (entry.toDate) {
-    rows = rows.filter(r => r[entry.dateField] && r[entry.dateField] <= entry.toDate);
-  }
-  return [...rows].sort((a, b) => {
-    const av = a[entry.dateField] || '';
-    const bv = b[entry.dateField] || '';
-    return entry.sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-  });
-}
-
-function refreshTable(tableId) {
-  const entry = tableStore[tableId];
-  const wrap = chat.querySelector(`[data-table-id="${tableId}"]`);
-  if (!entry || !wrap) return;
-
-  const filtered = computeTableRows(entry);
-  const visible = filtered.slice(0, entry.pageSize);
-  wrap.querySelector('tbody').innerHTML = entry.renderRowFn(visible);
-
-  const filteredNote = filtered.length !== entry.rows.length ? ` (filtered from ${entry.rows.length})` : '';
-  wrap.querySelector('.table-count').textContent = `Showing ${visible.length} of ${filtered.length}${filteredNote}`;
-}
-
-// Generic "Show N entries" paginated table, with an optional date range
-// filter + sort direction when `dateField` (a key present on each row, e.g.
-// 'date' / 'order_date' / 'last_movement_date') is given. Shared by every
-// module's table (invoices, transactions, orders, stock items).
-function buildPaginatedTable(rows, renderRowFn, theadHtml, dateField = null) {
-  if (!rows.length) return '';
-
-  const tableId = `tbl-${tableSeq++}`;
-  tableStore[tableId] = { rows, renderRowFn, dateField, pageSize: DEFAULT_PAGE_SIZE, sortDir: 'desc', fromDate: '', toDate: '' };
-
-  const entry = tableStore[tableId];
-  const filtered = computeTableRows(entry);
-  const visible = filtered.slice(0, entry.pageSize);
-
-  const dateControls = dateField ? `
-    <div class="date-filter-controls">
-      <label>From <input type="date" class="date-from"></label>
-      <label>To <input type="date" class="date-to"></label>
-      <label>Sort
-        <select class="sort-dir-select">
-          <option value="desc" selected>Newest first</option>
-          <option value="asc">Oldest first</option>
-        </select>
-      </label>
-    </div>
-  ` : '';
-
-  return `
-    <div class="data-table-wrap" data-table-id="${tableId}">
-      <div class="table-controls">
-        <label class="page-size-label">
-          Show
-          <select class="page-size-select">
-            ${PAGE_SIZE_OPTIONS.map(n => `<option value="${n}" ${n === DEFAULT_PAGE_SIZE ? 'selected' : ''}>${n}</option>`).join('')}
-          </select>
-          entries
-        </label>
-        <span class="table-count">Showing ${visible.length} of ${filtered.length}</span>
-      </div>
-      ${dateControls}
-      <div class="table-scroll">
-        <table class="data-table">
-          <thead>${theadHtml}</thead>
-          <tbody>${renderRowFn(visible)}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-
-const INVOICE_THEAD = `
-  <tr>
-    <th>Voucher #</th><th>Type</th><th>Party</th><th>Date</th><th>Due</th><th>Amount</th><th>Status</th>
-  </tr>
-`;
-const TRANSACTION_THEAD = `
-  <tr>
-    <th>Date</th><th>Type</th><th>Voucher #</th><th>Debit</th><th>Credit</th><th>Status</th>
-  </tr>
-`;
-const ORDER_THEAD = `
-  <tr>
-    <th>Order #</th><th>Type</th><th>Party</th><th>Order Date</th><th>Target Date</th><th>Value</th><th>Pending</th><th>Status</th>
-  </tr>
-`;
-const STOCK_THEAD = `
-  <tr>
-    <th>Item</th><th>Unit</th><th>Stock Qty</th><th>Reorder Level</th><th>Monthly Use</th><th>Last Movement</th><th>Vendor</th><th>Status</th>
-  </tr>
-`;
-
-function buildInvoiceTable(invoices) {
-  return buildPaginatedTable(invoices, renderInvoiceRows, INVOICE_THEAD, 'date');
-}
-function buildTransactionTable(entries) {
-  return buildPaginatedTable(entries, renderTransactionRows, TRANSACTION_THEAD, 'date');
-}
-function buildOrderTable(orders) {
-  return buildPaginatedTable(orders, renderOrderRows, ORDER_THEAD, 'order_date');
-}
-function buildStockTable(items) {
-  return buildPaginatedTable(items, renderStockRows, STOCK_THEAD, 'last_movement_date');
-}
-
-chat.addEventListener('change', (e) => {
-  const wrap = e.target.closest('.data-table-wrap');
-  if (!wrap) return;
-  const entry = tableStore[wrap.dataset.tableId];
-  if (!entry) return;
-
-  if (e.target.classList.contains('page-size-select')) {
-    entry.pageSize = parseInt(e.target.value, 10);
-  } else if (e.target.classList.contains('date-from')) {
-    entry.fromDate = e.target.value;
-  } else if (e.target.classList.contains('date-to')) {
-    entry.toDate = e.target.value;
-  } else if (e.target.classList.contains('sort-dir-select')) {
-    entry.sortDir = e.target.value;
-  } else {
-    return;
-  }
-  refreshTable(wrap.dataset.tableId);
-});
-
-function buildLedgerInfoCard(data) {
-  const balance = `${fmtMoney(data.closing_balance)} ${data.closing_balance_type === 'debit' ? 'Dr' : 'Cr'}`;
-  const rows = [
-    ['Group', data.group || '—'],
-    ['Email', data.email || '—'],
-    ['Phone', data.phone || '—'],
-    ['Address', data.address || '—'],
-    ['GSTIN', data.gstin || '—'],
-    ['Credit Limit', fmtMoney(data.credit_limit)],
-    ['Credit Days', data.credit_days],
-    ['Closing Balance', balance],
-    ['Last Transaction', data.last_transaction_date || '—'],
-  ].map(([label, value]) => `<tr><td>${label}</td><td>${escapeHtml(String(value))}</td></tr>`).join('');
-
-  return `
-    <table class="info-card"><tbody>${rows}</tbody></table>
-    <div class="info-summary-line">
-      <b>${data.outstanding_count}</b> outstanding invoice(s) totalling
-      <b>${fmtMoney(data.outstanding_total)}</b>
-      (${data.overdue_count} overdue).
-    </div>
-  `;
-}
-
-function buildAgingCard(data) {
-  const rows = data.buckets.map(b => `
-    <tr>
-      <td>${b.label}</td>
-      <td>${b.count}</td>
-      <td>${fmtMoney(b.total)}</td>
-    </tr>
-  `).join('');
-
-  return `
-    <table class="info-card">
-      <thead><tr><td><b>Bucket</b></td><td><b>Count</b></td><td><b>Amount</b></td></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="info-summary-line">
-      <b>${data.total_count}</b> outstanding invoice(s) totalling <b>${fmtMoney(data.total_amount)}</b>.
-    </div>
-  `;
-}
-
-function buildCreditStatusCard(data) {
-  const limit = data.credit_limit;
-  const used = data.outstanding_total;
-  const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-
-  let status = 'Within Limit';
-  let barColor = '#21874b';
-  if (limit > 0 && used > limit) {
-    status = 'Over Limit';
-    barColor = '#c23b3b';
-  } else if (limit > 0 && used / limit >= 0.8) {
-    status = 'Near Limit';
-    barColor = '#9a7300';
-  } else if (limit === 0) {
-    status = 'No Credit Limit Set';
-    barColor = 'var(--muted)';
-  }
-
-  return `
-    <table class="info-card">
-      <tbody>
-        <tr><td>Credit Limit</td><td>${fmtMoney(limit)}</td></tr>
-        <tr><td>Outstanding Balance</td><td>${fmtMoney(used)}</td></tr>
-        <tr><td>Utilization</td><td>${pct}%</td></tr>
-        <tr><td>Status</td><td>${status}</td></tr>
-      </tbody>
-    </table>
-    <div class="credit-bar-track"><div class="credit-bar-fill" style="width:${pct}%; background:${barColor};"></div></div>
-  `;
-}
-
-function buildStockItemCard(item) {
-  const rows = [
-    ['Unit', item.unit],
-    ['Stock Qty', item.stock_qty],
-    ['Reorder Level', item.reorder_level],
-    ['Monthly Consumption', item.monthly_consumption],
-    ['Last Movement', item.last_movement_date || '—'],
-    ['Preferred Vendor', item.preferred_vendor || '—'],
-  ].map(([label, value]) => `<tr><td>${label}</td><td>${escapeHtml(String(value))}</td></tr>`).join('');
-
-  return `
-    <table class="info-card"><tbody>${rows}</tbody></table>
-    <div class="info-summary-line">
-      Status: <span class="status-pill ${item.status}">${item.status_label}</span>
-    </div>
-  `;
-}
-
-async function runLedgerInfo() {
-  const loadingRow = addBotLoading();
-  try {
-    const res = await fetch(`${DETAIL_URL}?ledger_id=${currentLedger.id}`);
-    const data = await res.json();
-
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    withExportButton(loadingRow.querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's **Contact & Credit Info** for **${data.name}**.`)}
-      ${buildLedgerInfoCard(data)}
-    `, true);
-  } catch (err) {
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    loadingRow.querySelector('.bubble').textContent = 'Something went wrong fetching that company\'s details.';
-  }
-  scrollToBottom();
-}
-
-async function runLedgerAging() {
-  const loadingRow = addBotLoading();
-  try {
-    const res = await fetch(`${AGING_URL}?ledger_id=${currentLedger.id}`);
-    const data = await res.json();
-
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    withExportButton(loadingRow.querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's the **Aging Summary** for **${data.ledger_name}**.`)}
-      ${buildAgingCard(data)}
-    `, true);
-  } catch (err) {
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    loadingRow.querySelector('.bubble').textContent = "Something went wrong fetching that company's aging summary.";
-  }
-  scrollToBottom();
-}
-
-async function runCreditStatus() {
-  const loadingRow = addBotLoading();
-  try {
-    const res = await fetch(`${DETAIL_URL}?ledger_id=${currentLedger.id}`);
-    const data = await res.json();
-
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    withExportButton(loadingRow.querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's the **Credit Limit Status** for **${data.name}**.`)}
-      ${buildCreditStatusCard(data)}
-    `, true);
-  } catch (err) {
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    loadingRow.querySelector('.bubble').textContent = "Something went wrong fetching that company's credit status.";
-  }
-  scrollToBottom();
-}
-
-async function runTransactions() {
-  const loadingRow = addBotLoading();
-  try {
-    const res = await fetch(`${TRANSACTIONS_URL}?ledger_id=${currentLedger.id}`);
-    const data = await res.json();
-
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    const message = data.count
-      ? `Here's the **Full Transaction History** for **${data.ledger_name}** — ${data.count} entrie(s).`
-      : `No transactions found for **${data.ledger_name}**.`;
-    withExportButton(loadingRow.querySelector('.bubble'), `
-      ${renderMarkdownLite(message)}
-      ${buildTransactionTable(data.entries)}
-    `, data.count > 0);
-  } catch (err) {
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    loadingRow.querySelector('.bubble').textContent = "Something went wrong fetching that company's transaction history.";
-  }
-  scrollToBottom();
-}
-
-// Per-module configuration driving the whole pebble/search/table engine.
-// idParam is the query-string key used to scope a module's query endpoint to
-// one ledger (customers/vendors are both plain Ledger rows either way).
-const MODULES = {
-  outstanding_invoices: {
-    label: 'Outstanding Invoices',
-    staticPebbles: OUTSTANDING_STATIC_PEBBLES,
-    dynamicPebbles: OUTSTANDING_DYNAMIC_PEBBLES,
-    filterPatterns: OUTSTANDING_FILTER_PATTERNS,
-    queryUrl: QUERY_URL,
-    idParam: 'ledger_id',
-    rowsField: 'invoices',
-    buildTable: buildInvoiceTable,
-    dedicatedActions: {
-      info: runLedgerInfo, aging: runLedgerAging, credit_status: runCreditStatus, transactions: runTransactions,
-    },
-  },
-  order_book: {
-    label: 'Order Book',
-    staticPebbles: ORDER_STATIC_PEBBLES,
-    dynamicPebbles: ORDER_DYNAMIC_PEBBLES,
-    filterPatterns: ORDER_FILTER_PATTERNS,
-    queryUrl: ORDER_QUERY_URL,
-    idParam: 'ledger_id',
-    rowsField: 'orders',
-    buildTable: buildOrderTable,
-    dedicatedActions: { info: runLedgerInfo },
-  },
-  inventory: {
-    label: 'Inventory',
-    staticPebbles: INVENTORY_STATIC_PEBBLES,
-    dynamicPebbles: INVENTORY_DYNAMIC_PEBBLES,
-    filterPatterns: INVENTORY_FILTER_PATTERNS,
-    queryUrl: INVENTORY_QUERY_URL,
-    idParam: 'vendor_id',
-    rowsField: 'items',
-    buildTable: buildStockTable,
-    dedicatedActions: { info: runLedgerInfo },
-    itemSearchUrl: ITEM_SEARCH_URL,
-  },
-};
-
-function buildCompanyMatchPebbles(matches) {
-  return matches.map(m =>
-    `<button class="pebble" data-ledger-id="${m.id}" data-ledger-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}</button>`
-  ).join('');
-}
-
-function renderPebbles() {
-  const module = MODULES[currentModuleKey];
-  const pebbles = currentLedger ? module.dynamicPebbles : module.staticPebbles;
-  pebblesBar.innerHTML = pebbles.map(p =>
-    `<button class="pebble${p.key === 'reset' ? ' reset' : ''}" data-key="${p.key}">${escapeHtml(p.label)}</button>`
-  ).join('');
-}
-
-async function runModuleQuery(filterKey, activeButton) {
-  const module = MODULES[currentModuleKey];
-  document.querySelectorAll('.pebble').forEach(b => b.classList.remove('active'));
-  if (activeButton) activeButton.classList.add('active');
-
-  const loadingRow = addBotLoading();
-  const params = new URLSearchParams({ type: filterKey });
-  if (currentLedger) params.set(module.idParam, currentLedger.id);
-
-  try {
-    const res = await fetch(`${module.queryUrl}?${params.toString()}`);
-    const data = await res.json();
-
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    const rows = data[module.rowsField];
-    withExportButton(loadingRow.querySelector('.bubble'), `
-      ${renderMarkdownLite(data.message)}
-      ${module.buildTable(rows)}
-    `, rows.length > 0);
-  } catch (err) {
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    loadingRow.querySelector('.bubble').textContent = 'Something went wrong fetching that data. Please try again.';
-  }
-  scrollToBottom();
-}
-
-function dispatchFilterAction(filterKey, activeButton = null) {
-  const module = MODULES[currentModuleKey];
-  const action = module.dedicatedActions[filterKey];
-  if (action) {
-    document.querySelectorAll('.pebble').forEach(b => b.classList.remove('active'));
-    if (activeButton) activeButton.classList.add('active');
-    action();
-    return;
-  }
-  runModuleQuery(filterKey, activeButton);
-}
-
-// Two-bubble company-focus intro: Bubble 1 is always the shared Complete
-// Ledger card (contact/credit/balance); Bubble 2 is the current module's
-// own "everything for this company" view.
-async function showCompanyOverview(ledgerId, ledgerName) {
-  const module = MODULES[currentModuleKey];
-
-  const infoLoading = addBotLoading();
-  try {
-    const res = await fetch(`${DETAIL_URL}?ledger_id=${ledgerId}`);
-    const data = await res.json();
-    infoLoading.querySelector('.bubble').classList.remove('loading-dots');
-    withExportButton(infoLoading.querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's the **Complete Ledger** for **${data.name}**.`)}
-      ${buildLedgerInfoCard(data)}
-    `, true);
-  } catch (err) {
-    infoLoading.querySelector('.bubble').classList.remove('loading-dots');
-    infoLoading.querySelector('.bubble').textContent = "Something went wrong fetching that company's ledger.";
-  }
-  scrollToBottom();
-
-  const secondLoading = addBotLoading();
-  try {
-    const params = new URLSearchParams({ type: 'all' });
-    params.set(module.idParam, ledgerId);
-    const res = await fetch(`${module.queryUrl}?${params.toString()}`);
-    const data = await res.json();
-    secondLoading.querySelector('.bubble').classList.remove('loading-dots');
-    const rows = data[module.rowsField];
-    withExportButton(secondLoading.querySelector('.bubble'), `
-      ${renderMarkdownLite(data.message)}
-      ${module.buildTable(rows)}
-    `, rows.length > 0);
-  } catch (err) {
-    secondLoading.querySelector('.bubble').classList.remove('loading-dots');
-    secondLoading.querySelector('.bubble').textContent = 'Something went wrong fetching that data.';
-  }
-  scrollToBottom();
-}
-
-function enterCompanyContext(ledgerId, ledgerName, filterKey = null) {
-  currentLedger = { id: ledgerId, name: ledgerName };
-  renderPebbles();
-
-  if (filterKey && filterKey !== 'reset') {
-    dispatchFilterAction(filterKey);
-  } else {
-    showCompanyOverview(ledgerId, ledgerName);
-  }
-}
-
-function exitCompanyContext() {
-  currentLedger = null;
-  renderPebbles();
-}
-
-function switchModule(moduleKey) {
-  currentLedger = null;
-  pendingFilterKey = null;
-  currentModuleKey = moduleKey;
-
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.module === moduleKey));
-  topbarTitle.textContent = MODULES[moduleKey].label;
-  renderPebbles();
-  addBotBubble(renderMarkdownLite(`Switched to **${MODULES[moduleKey].label}**. What would you like to see?`));
-}
-
-moduleNav.addEventListener('click', (e) => {
-  const btn = e.target.closest('.nav-item');
-  if (!btn) return;
-  switchModule(btn.dataset.module);
-});
-
-const themeToggleBtn = document.getElementById('theme-toggle');
-themeToggleBtn.addEventListener('click', () => {
-  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = next;
-  localStorage.setItem('ledger-theme', next);
-});
-
-async function fetchLedgerMatches(q) {
-  const res = await fetch(`${SEARCH_URL}?q=${encodeURIComponent(q)}`);
-  return res.json();
-}
-
-// If the cleaned-up phrase doesn't match anything as a whole (e.g. it still has
-// a leftover misspelled filler word like "infomartion kumar"), fall back to
-// testing each remaining word against the real ledger data individually and
-// merge whatever hits — the ledger dictionary decides what's a name, not
-// another string heuristic.
-async function fetchLedgerMatchesWithFallback(text) {
-  let data = await fetchLedgerMatches(text);
-  if (data.count > 0) return data;
-
-  const words = [...new Set(text.split(/\s+/).filter(w => w.length > 2))];
-  if (words.length <= 1) return data;
-
-  const perWord = await Promise.all(words.map(fetchLedgerMatches));
-  const merged = new Map();
-  perWord.forEach(r => r.matches.forEach(m => merged.set(m.id, m)));
-  if (merged.size === 0) return data;
-
-  return { query: text, count: merged.size, matches: [...merged.values()] };
-}
-
-// Matches from the last multi-item disambiguation, keyed by id, so picking a
-// pebble can render the full card without another round trip.
-let itemMatchStore = {};
-
-function renderStockItemBubble(item) {
-  const row = addBotBubble('');
-  withExportButton(row.querySelector('.bubble'), `
-    ${renderMarkdownLite(`Here's **${item.name}** from Inventory.`)}
-    ${buildStockItemCard(item)}
-  `, true);
-  scrollToBottom();
-}
-
-async function fetchItemMatches(itemSearchUrl, q) {
-  const res = await fetch(`${itemSearchUrl}?q=${encodeURIComponent(q)}`);
-  return res.json();
-}
-
-async function presentItemMatches(data, text) {
-  const loadingRow = addBotLoading();
-  loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-
-  if (data.count === 1) {
-    const item = data.matches[0];
-    withExportButton(loadingRow.querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's **${item.name}** from Inventory.`)}
-      ${buildStockItemCard(item)}
-    `, true);
-    scrollToBottom();
-    return;
-  }
-
-  loadingRow.querySelector('.bubble').innerHTML = renderMarkdownLite(`Found **${data.count}** stock items matching "${text}". Which one?`);
-  itemMatchStore = Object.fromEntries(data.matches.map(m => [String(m.id), m]));
-  pebblesBar.innerHTML = data.matches.map(m =>
-    `<button class="pebble" data-item-id="${m.id}">${escapeHtml(m.name)}</button>`
-  ).join('');
-  scrollToBottom();
-}
-
-// Inventory-only: try an item-name match first (e.g. "steel rod"); if nothing
-// matches, fall back to the normal vendor/company search everyone else uses.
-async function resolveInventorySearch(module, text, filterKey) {
-  const itemData = await fetchItemMatches(module.itemSearchUrl, text);
-  if (itemData.count > 0) {
-    presentItemMatches(itemData, text);
-    return;
-  }
-  searchCompanies(text, filterKey);
-}
-
-async function searchCompanies(text, filterKey = null) {
-  const module = MODULES[currentModuleKey];
-  const pebbleLabels = Object.fromEntries(module.dynamicPebbles.map(p => [p.key, p.label]));
-
-  const loadingRow = addBotLoading();
-  try {
-    const data = await fetchLedgerMatchesWithFallback(text);
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-
-    if (data.count === 0) {
-      loadingRow.querySelector('.bubble').innerHTML = renderMarkdownLite(`No company found matching "${text}".`);
-      scrollToBottom();
-      return;
-    }
-
-    if (data.count === 1) {
-      const match = data.matches[0];
-      const intro = filterKey
-        ? `Found **${match.name}**. Here's **${pebbleLabels[filterKey] || filterKey}**.`
-        : `Found **${match.name}**. Here's their ledger and details.`;
-      loadingRow.querySelector('.bubble').innerHTML = renderMarkdownLite(intro);
-      scrollToBottom();
-      enterCompanyContext(match.id, match.name, filterKey);
-      return;
-    }
-
-    loadingRow.querySelector('.bubble').innerHTML = renderMarkdownLite(`Found **${data.count}** companies matching "${text}". Which one?`);
-    pendingFilterKey = filterKey;
-    pebblesBar.innerHTML = buildCompanyMatchPebbles(data.matches);
-    scrollToBottom();
-  } catch (err) {
-    loadingRow.querySelector('.bubble').classList.remove('loading-dots');
-    loadingRow.querySelector('.bubble').textContent = 'Something went wrong searching for that company.';
-  }
-}
-
-pebblesBar.addEventListener('click', (e) => {
-  const btn = e.target.closest('.pebble');
-  if (!btn) return;
-
-  if (btn.dataset.ledgerId) {
-    addUserRow(btn.textContent);
-    const filterKey = pendingFilterKey;
-    pendingFilterKey = null;
-    enterCompanyContext(btn.dataset.ledgerId, btn.dataset.ledgerName, filterKey);
-    return;
-  }
-
-  if (btn.dataset.itemId) {
-    addUserRow(btn.textContent);
-    const item = itemMatchStore[btn.dataset.itemId];
-    renderPebbles();
-    if (item) renderStockItemBubble(item);
-    return;
-  }
-
-  addUserRow(btn.textContent);
-
-  if (btn.dataset.key === 'reset') {
-    exitCompanyContext();
-    addBotBubble("You're back to browsing all companies. What would you like to see?");
-    return;
-  }
-
-  dispatchFilterAction(btn.dataset.key, btn);
-});
-
-function submitComposer() {
-  const text = input.value.trim();
-  if (!text) return;
-  addUserRow(text);
-  input.value = '';
-
-  const module = MODULES[currentModuleKey];
-  const { filterKey, companyQuery } = extractIntent(text, module.filterPatterns);
-
-  if (companyQuery) {
-    // "kumar due this week" -> search for "kumar", then apply the filter once resolved.
-    // "reset" alone doesn't make sense paired with a company name — drop it.
-    const resolvedFilterKey = filterKey === 'reset' ? null : filterKey;
-    if (module.itemSearchUrl) {
-      // Inventory: try a stock item name first, fall back to vendor search.
-      resolveInventorySearch(module, companyQuery, resolvedFilterKey);
-    } else {
-      searchCompanies(companyQuery, resolvedFilterKey);
-    }
-    return;
-  }
-
-  if (filterKey === 'reset') {
-    exitCompanyContext();
-    addBotBubble("You're back to browsing all companies. What would you like to see?");
-    return;
-  }
-
-  if (filterKey) {
-    // A recognized filter with no company mentioned resets any active company context.
-    currentLedger = null;
-    renderPebbles();
-    runModuleQuery(filterKey, null);
-    return;
-  }
-
-  addBotBubble("I didn't catch that — try a company name, or a filter like \"overdue\" or \"low stock\".");
-}
-
-sendBtn.addEventListener('click', submitComposer);
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') submitComposer();
-});
-</script>
-
-</body>
+    {# Hidden csrftoken input purely so Django sets the csrftoken cookie on #}
+    {# load; the export-to-PDF fetch in main.js reads that cookie. #}
+    <form style="display:none">{% csrf_token %}</form>
+
+    <script>
+      window.TOTAL_LEDGERS = "{{ ledger_count|escapejs }}";
+      const QUERY_URL = "{% url 'ledger:query_api' %}";
+      const SEARCH_URL = "{% url 'ledger:ledger_search_api' %}";
+      const DETAIL_URL = "{% url 'ledger:ledger_detail_api' %}";
+      const AGING_URL = "{% url 'ledger:ledger_aging_api' %}";
+      const TRANSACTIONS_URL = "{% url 'ledger:ledger_transactions_api' %}";
+      const ORDER_QUERY_URL = "{% url 'ledger:order_query_api' %}";
+      const INVENTORY_QUERY_URL = "{% url 'ledger:inventory_query_api' %}";
+      const ITEM_SEARCH_URL = "{% url 'ledger:stock_item_search_api' %}";
+      const EXPORT_PDF_URL = "{% url 'ledger:export_pdf_api' %}";
+      const LOGO_URL = "{% static 'ledger/logo.jpeg' %}";
+    </script>
+    <script src="{% static 'ledger/js/main.js' %}"></script>
+  </body>
 </html>
