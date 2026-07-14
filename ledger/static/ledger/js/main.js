@@ -32,6 +32,17 @@ sidebarOverlay.addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 // Chat primitives
 // ---------------------------------------------------------------------------
+
+// Auto-resize the composer when it's a textarea so users can type multiple
+// lines comfortably. Works for both <input> (no-op) and <textarea>.
+function autoResizeComposer() {
+  if (!chatInput) return;
+  if (chatInput.tagName.toLowerCase() !== 'textarea') return;
+  chatInput.style.height = 'auto';
+  const newHeight = Math.min(chatInput.scrollHeight, 200);
+  chatInput.style.height = `${newHeight}px`;
+}
+chatInput && chatInput.addEventListener('input', autoResizeComposer);
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -80,23 +91,22 @@ function showTyping() {
   return wrap;
 }
 
-// Renders a row of pebble buttons under the chat flow (not a fixed bar —
-// matches the delivered design's inline suggestion-chip pattern). `bubbles`
-// is an array of { label, ...whatever handlePebbleClick needs to route it }.
-function appendPebbleRow(bubbles, onPick) {
-  if (!bubbles || !bubbles.length) return null;
-  const wrap = document.createElement('div');
-  wrap.className = 'pebble-row';
+// Pebbles live in a single dock pinned above the composer (not inline in the
+// chat flow) so they never scroll away with old messages and always reflect
+// whatever's currently available. `bubbles` is an array of
+// { label, ...whatever handlePebbleClick needs to route it }.
+const pebbleDock = document.getElementById('pebbleDock');
+
+function renderPebbleDock(bubbles, onPick) {
+  pebbleDock.innerHTML = '';
+  if (!bubbles || !bubbles.length) return;
   bubbles.forEach((bubble) => {
     const btn = document.createElement('button');
     btn.className = 'pebble';
     btn.innerText = bubble.label;
     btn.onclick = () => onPick(bubble);
-    wrap.appendChild(btn);
+    pebbleDock.appendChild(btn);
   });
-  chatBody.appendChild(wrap);
-  scrollChatToBottom();
-  return wrap;
 }
 
 const EXPORT_BTN_HTML = '<button class="mini-action export-btn" type="button">&#8595; Export PDF</button>';
@@ -270,14 +280,16 @@ function computeTableRows(entry) {
 }
 
 // Preset ranges for the date-range dropdown. All presets run from their
-// start date through today; "Custom Range" leaves fromDate/toDate alone so
-// the manual From/To inputs (revealed only for that option) take over.
+// start date through today; "Custom" leaves fromDate/toDate alone so the
+// manual From/To inputs (revealed only for that option) take over. Default
+// is "custom" with blank dates — i.e. unfiltered — since a default rolling
+// window would hide exactly the rows some pebbles are meant to surface
+// (e.g. Dead Stock's whole point is old last-movement dates).
 const DATE_RANGE_PRESETS = [
-  { key: 'all', label: 'All Time' },
-  { key: 'this_week', label: 'This Week' },
-  { key: 'this_month', label: 'This Month' },
-  { key: 'last_2_months', label: 'Last 2 Months' },
-  { key: 'custom', label: 'Custom Range' },
+  { key: 'last_10_days', label: 'Last 10 days' },
+  { key: 'last_30_days', label: 'Last 30 days' },
+  { key: 'last_60_days', label: 'Last 60 days' },
+  { key: 'custom', label: 'Custom' },
 ];
 
 function toISODate(d) {
@@ -286,20 +298,10 @@ function toISODate(d) {
 
 function computePresetRange(preset) {
   const now = new Date();
-  if (preset === 'this_week') {
-    const day = now.getDay();
-    const diffToMonday = day === 0 ? 6 : day - 1;
+  const days = { last_10_days: 10, last_30_days: 30, last_60_days: 60 }[preset];
+  if (days) {
     const start = new Date(now);
-    start.setDate(now.getDate() - diffToMonday);
-    return { from: toISODate(start), to: toISODate(now) };
-  }
-  if (preset === 'this_month') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { from: toISODate(start), to: toISODate(now) };
-  }
-  if (preset === 'last_2_months') {
-    const start = new Date(now);
-    start.setMonth(now.getMonth() - 2);
+    start.setDate(now.getDate() - days);
     return { from: toISODate(start), to: toISODate(now) };
   }
   return { from: '', to: '' };
@@ -327,7 +329,7 @@ function buildPaginatedTable(rows, renderRowFn, theadHtml, dateField = null) {
   const tableId = `tbl-${tableSeq++}`;
   tableStore[tableId] = {
     rows, renderRowFn, dateField, pageSize: DEFAULT_PAGE_SIZE, sortDir: 'desc',
-    rangePreset: 'all', fromDate: '', toDate: '',
+    rangePreset: 'custom', fromDate: '', toDate: '',
   };
 
   const entry = tableStore[tableId];
@@ -538,11 +540,9 @@ const OUTSTANDING_STATIC_PEBBLES = [
   { key: 'overdue', label: 'Overdue Only' },
   { key: 'due_this_week', label: 'Due This Week' },
   { key: 'high_value', label: 'High Value Outstanding' },
-  { key: 'all', label: 'All Outstanding' },
 ];
 
 const OUTSTANDING_DYNAMIC_PEBBLES = [
-  { key: 'all', label: 'Outstanding Invoices' },
   { key: 'overdue', label: 'Overdue Only' },
   { key: 'due_this_week', label: 'Due This Week' },
   { key: 'high_value', label: 'High Value' },
@@ -566,7 +566,6 @@ const OUTSTANDING_FILTER_PATTERNS = [
   { key: 'customer', patterns: ['\\bcustomers?\\b'] },
   { key: 'supplier', patterns: ['\\bsuppliers?\\b', '\\bvendors?\\b'] },
   { key: 'reset', patterns: ['\\ball\\s+companies\\b', '\\bstart\\s+over\\b', '\\breset\\b'] },
-  { key: 'all', patterns: ['\\ball\\s+outstanding\\b', '\\boutstanding\\s+invoices\\b', '\\boutstanding\\b'] },
 ];
 
 const ORDER_STATIC_PEBBLES = [
@@ -747,7 +746,7 @@ function currentPebbleSet() {
 }
 
 function showCurrentPebbles() {
-  appendPebbleRow(currentPebbleSet(), handlePebbleClick);
+  renderPebbleDock(currentPebbleSet(), handlePebbleClick);
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,7 +1053,7 @@ async function searchCompanies(text, filterKey = null) {
     }
 
     appendBotMessage(`Found <b>${data.count}</b> companies matching "${escapeHtml(text)}". Which one?`);
-    appendPebbleRow(
+    renderPebbleDock(
       data.matches.map(m => ({
         label: m.name, ledgerId: m.id, ledgerName: m.name, pendingFilterKey: filterKey,
         scopedModuleKey: currentModuleKey,
@@ -1084,7 +1083,7 @@ async function presentItemMatches(data, text) {
   }
 
   appendBotMessage(`Found <b>${data.count}</b> stock items matching "${escapeHtml(text)}". Which one?`);
-  appendPebbleRow(
+  renderPebbleDock(
     data.matches.map(m => ({ label: m.name, itemId: m.id, item: m, scopedModuleKey: currentModuleKey })),
     handlePebbleClick,
   );
@@ -1193,6 +1192,7 @@ async function handleSend() {
   const text = chatInput.value.trim();
   if (!text) return;
   chatInput.value = '';
+  autoResizeComposer();
   appendUserMessage(text);
 
   const module = MODULES[currentModuleKey];
@@ -1235,7 +1235,10 @@ async function dispatchFilterActionAsync(filterKey) {
 
 sendBtn.addEventListener('click', handleSend);
 chatInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleSend();
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    handleSend();
+  }
 });
 
 window.addEventListener('load', () => {

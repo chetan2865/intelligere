@@ -149,28 +149,31 @@
         </div>
         <div class="chat-body" id="chatBody"></div>
         <div class="chat-input-wrapper">
-          <div class="chat-input-bar">
-            <input
-              id="chatInput"
-              type="text"
-              placeholder="Ask me anything..."
-              autocomplete="off"
-            />
-            <button class="send-btn" id="sendBtn">
-              <svg
-                stroke="currentColor"
-                fill="currentColor"
-                stroke-width="0"
-                viewBox="0 0 512 512"
-                height="1em"
-                width="1em"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M48 448l416-192L48 64v149.333L346 256 48 298.667z"
-                ></path>
-              </svg>
-            </button>
+          <div class="chat-input-stack">
+            <div class="pebble-dock" id="pebbleDock"></div>
+            <div class="chat-input-bar">
+              <textarea
+                id="chatInput"
+                rows="1"
+                placeholder="Ask me anything..."
+                autocomplete="off"
+              ></textarea>
+              <button class="send-btn" id="sendBtn">
+                <svg
+                  stroke="currentColor"
+                  fill="currentColor"
+                  stroke-width="0"
+                  viewBox="0 0 512 512"
+                  height="1em"
+                  width="1em"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M48 448l416-192L48 64v149.333L346 256 48 298.667z"
+                  ></path>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </main>
