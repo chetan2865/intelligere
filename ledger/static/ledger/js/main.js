@@ -53,6 +53,20 @@ function renderMarkdownLite(text) {
   return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 }
 
+// The backend's own wording for a couple of filter labels doesn't match the
+// pebble text shown in the UI (e.g. "Open Orders" pebble → "Pending
+// Delivery"). Rather than touch the backend, swap the wording client-side
+// wherever a raw server message gets rendered, so it reads consistently
+// everywhere.
+const SERVER_LABEL_OVERRIDES = [
+  [/\bOpen Orders\b/g, 'Pending Delivery'],
+  [/\bPending Procurement\b/g, 'Yet to Arrive'],
+];
+
+function applyLabelOverrides(text) {
+  return SERVER_LABEL_OVERRIDES.reduce((acc, [pattern, replacement]) => acc.replace(pattern, replacement), text);
+}
+
 function fmtMoney(n) {
   return `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
 }
@@ -242,7 +256,7 @@ function renderOrderRows(orders) {
       <td>${o.target_date || '—'}</td>
       <td>${fmtMoney(o.value)}</td>
       <td>${fmtMoney(o.pending_value)}</td>
-      <td><span class="status-pill ${o.is_complete ? 'upcoming' : 'due_today'}">${o.status_label}</span></td>
+      <td><span class="status-pill ${o.is_complete ? 'upcoming' : 'due_today'}">${applyLabelOverrides(o.status_label)}</span></td>
     </tr>
   `).join('');
 }
@@ -555,6 +569,13 @@ const OUTSTANDING_DYNAMIC_PEBBLES = [
 ];
 
 const OUTSTANDING_FILTER_PATTERNS = [
+  // Compound customer/supplier + overdue/high-value synonyms are checked
+  // first so e.g. "customer overdue" resolves to the combined sub-filter
+  // instead of the plain 'overdue' or 'customer' key.
+  { key: 'overdue_customer', patterns: ['\\bcustomer\\s+overdues?\\b', '\\boverdues?\\s+customer\\b'] },
+  { key: 'overdue_supplier', patterns: ['\\bsupplier\\s+overdues?\\b', '\\boverdues?\\s+supplier\\b'] },
+  { key: 'high_value_customer', patterns: ['\\bcustomer\\s+high[- ]value\\b', '\\bhigh[- ]value\\s+customer\\b'] },
+  { key: 'high_value_supplier', patterns: ['\\bsupplier\\s+high[- ]value\\b', '\\bhigh[- ]value\\s+supplier\\b'] },
   { key: 'due_this_week', patterns: ['\\bdue\\s+this\\s+week\\b', '\\bdue\\s+in\\s+a\\s+week\\b', '\\bthis\\s+week\\b'] },
   { key: 'overdue', patterns: ['\\boverdue\\b', '\\bpast\\s+due\\b', '\\blate\\b'] },
   { key: 'high_value', patterns: ['\\bhigh[- ]value\\b'] },
@@ -571,26 +592,23 @@ const OUTSTANDING_FILTER_PATTERNS = [
 const ORDER_STATIC_PEBBLES = [
   { key: 'sales_orders', label: 'Sales Orders' },
   { key: 'purchase_orders', label: 'Purchase Orders' },
-  { key: 'open_orders', label: 'Open Orders' },
+  { key: 'open_orders', label: 'Pending Delivery' },
   { key: 'pending_dispatch', label: 'Pending Dispatch' },
-  { key: 'pending_procurement', label: 'Pending Procurement' },
 ];
 
 const ORDER_DYNAMIC_PEBBLES = [
   { key: 'all', label: 'All Orders' },
   { key: 'sales_orders', label: 'Sales Orders' },
   { key: 'purchase_orders', label: 'Purchase Orders' },
-  { key: 'open_orders', label: 'Open Orders' },
+  { key: 'open_orders', label: 'Pending Delivery' },
   { key: 'pending_dispatch', label: 'Pending Dispatch' },
-  { key: 'pending_procurement', label: 'Pending Procurement' },
   { key: 'info', label: 'Contact & Credit Info' },
   { key: 'reset', label: 'All Companies' },
 ];
 
 const ORDER_FILTER_PATTERNS = [
   { key: 'pending_dispatch', patterns: ['\\bpending\\s+dispatch\\b'] },
-  { key: 'pending_procurement', patterns: ['\\bpending\\s+procurement\\b'] },
-  { key: 'open_orders', patterns: ['\\bopen\\s+orders?\\b'] },
+  { key: 'open_orders', patterns: ['\\bpending\\s+delivery\\b', '\\bopen\\s+orders?\\b'] },
   { key: 'sales_orders', patterns: ['\\bsales?\\s+orders?\\b'] },
   { key: 'purchase_orders', patterns: ['\\bpurchase\\s+orders?\\b'] },
   { key: 'info', patterns: ['\\bcontact\\s+(info|details)\\b', '\\bcredit\\s+(info|details|limit)\\b', '\\bbalance\\b', '\\bgstin\\b'] },
@@ -727,6 +745,26 @@ let currentModuleKey = 'outstanding';
 // Matches from the last multi-item disambiguation, keyed by id.
 let itemMatchStore = {};
 
+// Which Customer/Supplier sub-filter family (if any) is active in the
+// Outstanding module — 'overdue', 'high_value', or null. Drives the extra
+// Customer/Supplier pebbles shown alongside the normal set; see
+// dispatchFilterAction, which keeps this in sync with whatever filter last ran.
+let outstandingFilterFamily = null;
+const OUTSTANDING_FAMILY_OF = {
+  overdue: 'overdue', overdue_customer: 'overdue', overdue_supplier: 'overdue',
+  high_value: 'high_value', high_value_customer: 'high_value', high_value_supplier: 'high_value',
+};
+const OUTSTANDING_FAMILY_SUB_PEBBLES = {
+  overdue: [
+    { key: 'overdue_customer', label: 'Customer Overdue' },
+    { key: 'overdue_supplier', label: 'Supplier Overdue' },
+  ],
+  high_value: [
+    { key: 'high_value_customer', label: 'Customer High Value' },
+    { key: 'high_value_supplier', label: 'Supplier High Value' },
+  ],
+};
+
 // Every pebble is stamped with the module/company context it was rendered
 // under. Chat history keeps old pebble rows around indefinitely, and their
 // click handlers otherwise read live global state — so once the user
@@ -737,7 +775,10 @@ let itemMatchStore = {};
 function currentPebbleSet() {
   const module = MODULES[currentModuleKey];
   const base = currentLedger ? module.dynamicPebbles : module.staticPebbles;
-  return base.map((p) => ({
+  const subPebbles = (currentModuleKey === 'outstanding' && outstandingFilterFamily)
+    ? OUTSTANDING_FAMILY_SUB_PEBBLES[outstandingFilterFamily]
+    : [];
+  return [...subPebbles, ...base].map((p) => ({
     ...p,
     scopedModuleKey: currentModuleKey,
     scopedLedgerId: currentLedger ? currentLedger.id : null,
@@ -790,6 +831,9 @@ function computeGlobalMostUsed() {
     [...module.staticPebbles, ...module.dynamicPebbles].forEach((p) => {
       if (p.key !== 'reset') labelMap.set(p.key, p.label);
     });
+    if (moduleKey === 'outstanding') {
+      Object.entries(PARTY_FILTER_MAP).forEach(([key, cfg]) => labelMap.set(key, cfg.label));
+    }
     Object.entries(usage[moduleKey]).forEach(([filterKey, count]) => {
       if (count > 0 && labelMap.has(filterKey)) {
         entries.push({ moduleKey, filterKey, count, label: labelMap.get(filterKey), moduleLabel: module.shortLabel });
@@ -904,6 +948,45 @@ async function runTransactions() {
   showCurrentPebbles();
 }
 
+// Customer/Supplier sub-filters for Overdue Only / High Value Outstanding.
+// There's no backend "type" for these combinations, so each one re-fetches
+// the base filter (overdue / high_value) from the existing endpoint and
+// narrows the rows client-side by invoice type (Sales = customer-facing,
+// Purchase = supplier-facing) — the same distinction the 'customer'/
+// 'supplier' pebbles already use server-side, just applied on top here.
+const PARTY_FILTER_MAP = {
+  overdue_customer: { baseKey: 'overdue', voucherType: 'Sales', label: 'Customer Overdue' },
+  overdue_supplier: { baseKey: 'overdue', voucherType: 'Purchase', label: 'Supplier Overdue' },
+  high_value_customer: { baseKey: 'high_value', voucherType: 'Sales', label: 'Customer High Value' },
+  high_value_supplier: { baseKey: 'high_value', voucherType: 'Purchase', label: 'Supplier High Value' },
+};
+
+async function runOutstandingPartyFilter(filterKey) {
+  const config = PARTY_FILTER_MAP[filterKey];
+  const typingEl = showTyping();
+  const params = new URLSearchParams({ type: config.baseKey });
+  if (currentLedger) params.set('ledger_id', currentLedger.id);
+
+  try {
+    const res = await fetch(`${QUERY_URL}?${params.toString()}`);
+    const data = await res.json();
+    typingEl.remove();
+    const rows = data.invoices.filter(inv => inv.type === config.voucherType);
+    const total = rows.reduce((sum, r) => sum + r.amount, 0);
+    const message = rows.length
+      ? `Here's <b>${config.label}</b> — ${rows.length} invoice(s) totalling ${fmtMoney(total)}.`
+      : `No <b>${config.label}</b> invoices found.`;
+    withExportButton(appendBotMessage('').querySelector('.bubble'), `
+      ${message}
+      ${buildInvoiceTable(rows)}
+    `, rows.length > 0);
+  } catch (err) {
+    typingEl.remove();
+    appendBotMessage('Something went wrong fetching that data. Please try again.');
+  }
+  showCurrentPebbles();
+}
+
 async function runModuleQuery(filterKey) {
   const module = MODULES[currentModuleKey];
   const typingEl = showTyping();
@@ -916,7 +999,7 @@ async function runModuleQuery(filterKey) {
     typingEl.remove();
     const rows = data[module.rowsField];
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
-      ${renderMarkdownLite(data.message)}
+      ${renderMarkdownLite(applyLabelOverrides(data.message))}
       ${module.buildTable(rows)}
     `, rows.length > 0);
   } catch (err) {
@@ -927,6 +1010,19 @@ async function runModuleQuery(filterKey) {
 }
 
 function dispatchFilterAction(filterKey) {
+  // Remember which "family" (overdue / high_value) is active so the
+  // Customer/Supplier sub-filter pebbles keep showing across the whole
+  // browsing session within that family — toggling between them, or
+  // re-running the base filter, doesn't lose the sub-filter row. Any other
+  // action clears it.
+  outstandingFilterFamily = OUTSTANDING_FAMILY_OF[filterKey] || null;
+
+  if (PARTY_FILTER_MAP[filterKey]) {
+    recordPebbleUsage(currentModuleKey, filterKey);
+    runOutstandingPartyFilter(filterKey);
+    return;
+  }
+
   const module = MODULES[currentModuleKey];
   const action = module.dedicatedActions[filterKey];
 
@@ -978,7 +1074,7 @@ async function showCompanyOverview(ledgerId, ledgerName) {
     typing2.remove();
     const rows = data[module.rowsField];
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
-      ${renderMarkdownLite(data.message)}
+      ${renderMarkdownLite(applyLabelOverrides(data.message))}
       ${module.buildTable(rows)}
     `, rows.length > 0);
   } catch (err) {
@@ -1166,6 +1262,7 @@ function handlePebbleClick(bubble) {
 function openModule(moduleKey, isInitial) {
   currentModuleKey = moduleKey;
   currentLedger = null;
+  outstandingFilterFamily = null;
 
   document.querySelectorAll('.module').forEach(b => b.classList.toggle('active', b.dataset.module === moduleKey));
   const module = MODULES[moduleKey];
