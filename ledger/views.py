@@ -1,6 +1,7 @@
 import io
 import json
 from datetime import date, timedelta
+from itertools import groupby
 
 from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
@@ -10,7 +11,8 @@ from django.views.decorators.http import require_POST
 from xhtml2pdf import pisa
 
 from .models import (
-    Ledger, LedgerEntry, Nature, PurchaseOrder, SalesOrder, StockItem, Voucher, VoucherType,
+    Ledger, LedgerEntry, Nature, PurchaseOrder, SalesOrder, StockItem, StockSku,
+    Voucher, VoucherType,
 )
 
 PEBBLES = [
@@ -32,6 +34,8 @@ EXTRA_FILTER_LABELS = {'paid': 'Payment History'}
 
 HIGH_VALUE_THRESHOLD = 50000
 SEARCH_RESULT_LIMIT = 8
+# A SKU with no movement for longer than this many days counts as dead stock.
+DEAD_STOCK_DAYS = 90
 AGING_BUCKETS = [
     ('Not Yet Due', None, -1),
     ('0-30 days', 0, 30),
@@ -391,38 +395,62 @@ INVENTORY_FILTER_LABELS = {
 }
 
 
-def _stock_status(item):
-    """Classify a stock item into exactly one bucket, most-urgent first."""
-    qty = float(item.stock_qty)
-    reorder = float(item.reorder_level)
-    consumption = float(item.monthly_consumption)
+def _sku_status(sku, today=None):
+    """Classify a single SKU into exactly one bucket, most-urgent first."""
+    today = today or timezone.localdate()
+    qty = float(sku.qty)
+    min_qty = float(sku.min_qty)
+    max_qty = float(sku.max_qty)
+    consumption = float(sku.monthly_consumption)
 
+    stale = bool(
+        sku.last_movement_date
+        and (today - sku.last_movement_date).days > DEAD_STOCK_DAYS
+    )
+
+    # Priority order = most actionable first. Each SKU lands in exactly one bucket.
     if qty < 0:
         return 'negative_stock', 'Negative Stock'
-    if consumption == 0:
+    if consumption == 0 or stale:
+        # No movement → reordering is pointless, so classify as dead before low.
         return 'dead_stock', 'Dead Stock'
-    if qty <= consumption:
-        return 'fast_moving', 'Fast Moving'
-    if qty <= reorder:
+    if min_qty and qty < min_qty:
         return 'low_stock', 'Low Stock'
-    if qty > max(reorder, consumption) * 3:
+    if max_qty and qty > max_qty:
         return 'overstock', 'Overstock'
+    if consumption and consumption >= qty:
+        # Stock on hand covers roughly one month or less of consumption.
+        return 'fast_moving', 'Fast Moving'
     return 'normal', 'Normal'
 
 
-def _serialize_stock_item(item):
-    bucket_key, bucket_label = _stock_status(item)
+def _serialize_sku(sku, status=None):
+    if status is None:
+        status = _sku_status(sku)
+    bucket_key, bucket_label = status
     return {
-        'id': item.pk,
-        'name': item.name,
-        'unit': item.unit,
-        'stock_qty': float(item.stock_qty),
-        'reorder_level': float(item.reorder_level),
-        'monthly_consumption': float(item.monthly_consumption),
-        'last_movement_date': item.last_movement_date.isoformat() if item.last_movement_date else None,
-        'preferred_vendor': item.preferred_vendor.name if item.preferred_vendor else None,
+        'id': sku.pk,
+        'item_id': sku.item_id,
+        'item_name': sku.item.name,
+        'sku_code': sku.sku_code,
+        'qty': float(sku.qty),
+        'unit': sku.unit,
+        'min_qty': float(sku.min_qty),
+        'max_qty': float(sku.max_qty),
+        'monthly_consumption': float(sku.monthly_consumption),
+        'last_movement_date': sku.last_movement_date.isoformat() if sku.last_movement_date else None,
+        'preferred_vendor': sku.item.preferred_vendor.name if sku.item.preferred_vendor else None,
         'status': bucket_key,
         'status_label': bucket_label,
+        'details': {
+            'description': sku.description,
+            'fabric_type': sku.fabric_type,
+            'material': sku.material,
+            'color': sku.color,
+            'size': sku.size,
+            'pattern': sku.pattern,
+            'quality': sku.quality,
+        },
     }
 
 
@@ -432,37 +460,59 @@ def inventory_query_api(request):
         filter_key = 'all'
 
     vendor_id = request.GET.get('vendor_id') or None
+    item_id = request.GET.get('item_id') or None
     vendor_name = None
     if vendor_id:
         vendor_name = Ledger.objects.filter(pk=vendor_id).values_list('name', flat=True).first()
 
-    qs = StockItem.objects.select_related('preferred_vendor')
+    qs = StockSku.objects.select_related('item', 'item__preferred_vendor')
     if vendor_id:
-        qs = qs.filter(preferred_vendor_id=vendor_id)
+        qs = qs.filter(item__preferred_vendor_id=vendor_id)
+    if item_id:
+        qs = qs.filter(item_id=item_id)
 
-    rows = []
-    for item in qs:
-        row = _serialize_stock_item(item)
+    today = timezone.localdate()
+    skus = []
+    for sku in qs:
+        row = _serialize_sku(sku, _sku_status(sku, today))
         if filter_key != 'all' and row['status'] != filter_key:
             continue
-        rows.append(row)
+        skus.append(row)
 
-    rows.sort(key=lambda r: r['name'])
+    skus.sort(key=lambda r: (r['item_name'], r['sku_code']))
+
+    # Group SKUs under their parent item so the UI can render an
+    # "Item name: Kurta" header followed by its SKU rows.
+    groups = []
+    for item_name, sku_iter in groupby(skus, key=lambda r: r['item_name']):
+        item_skus = list(sku_iter)
+        groups.append({
+            'item_name': item_name,
+            'item_id': item_skus[0]['item_id'],
+            'count': len(item_skus),
+            'skus': item_skus,
+        })
 
     label = INVENTORY_FILTER_LABELS[filter_key]
     scope = f" for **{vendor_name}**" if vendor_name else ''
-    if not rows:
+    if not skus:
         message = f"No records found for **{label}**{scope}."
     else:
-        message = f"Here's **{label}**{scope} — {len(rows)} item(s)."
+        message = (
+            f"Here's **{label}**{scope} — {len(skus)} SKU(s) "
+            f"across {len(groups)} item(s)."
+        )
 
     return JsonResponse({
         'filter': filter_key,
         'vendor_id': vendor_id,
         'vendor_name': vendor_name,
+        'item_id': item_id,
         'message': message,
-        'count': len(rows),
-        'items': rows,
+        'count': len(skus),
+        'item_count': len(groups),
+        'groups': groups,
+        'skus': skus,
     })
 
 
@@ -470,18 +520,32 @@ def stock_item_search_api(request):
     query = request.GET.get('q', '').strip()
     matches = []
     if query:
-        items = (
-            StockItem.objects.filter(name__icontains=query)
-            .select_related('preferred_vendor')
-            .order_by('name')[:SEARCH_RESULT_LIMIT]
+        skus = (
+            StockSku.objects
+            .select_related('item', 'item__preferred_vendor')
+            .filter(Q(sku_code__icontains=query) | Q(item__name__icontains=query))
+            .order_by('item__name', 'sku_code')[:SEARCH_RESULT_LIMIT]
         )
-        matches = [_serialize_stock_item(item) for item in items]
+        matches = [_serialize_sku(sku) for sku in skus]
 
     return JsonResponse({
         'query': query,
         'count': len(matches),
         'matches': matches,
     })
+
+
+def sku_detail_api(request):
+    """Full detail for a single SKU — powers the hover card."""
+    sku_id = request.GET.get('sku_id')
+    sku = (
+        StockSku.objects.select_related('item', 'item__preferred_vendor')
+        .filter(pk=sku_id)
+        .first()
+    )
+    if not sku:
+        return JsonResponse({'error': 'SKU not found'}, status=404)
+    return JsonResponse({'sku': _serialize_sku(sku)})
 
 
 @require_POST

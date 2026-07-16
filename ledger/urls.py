@@ -14,5 +14,6 @@ urlpatterns = [
     path('api/order-query/', views.order_query_api, name='order_query_api'),
     path('api/inventory-query/', views.inventory_query_api, name='inventory_query_api'),
     path('api/search-stock-item/', views.stock_item_search_api, name='stock_item_search_api'),
+    path('api/sku-detail/', views.sku_detail_api, name='sku_detail_api'),
     path('api/export-pdf/', views.export_pdf_api, name='export_pdf_api'),
 ]

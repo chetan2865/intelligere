@@ -151,3 +151,41 @@ class StockItem(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class StockSku(models.Model):
+    """A single SKU (variant) under a StockItem.
+
+    Mirrors how the main Intelligere backend stores inventory: one item
+    (e.g. "Kurta") has many SKU codes (KUR-COT-COT-BLA-001 ...), each with
+    its own quantity and min/max thresholds. All inventory buckets
+    (low / dead / negative / overstock / fast moving) are computed per SKU.
+    """
+    item = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name='skus')
+    sku_code = models.CharField(max_length=100)
+    unit = models.CharField(max_length=20, default='Nos')
+    qty = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    min_qty = models.DecimalField(max_digits=12, decimal_places=2, default=0)   # reorder threshold
+    max_qty = models.DecimalField(max_digits=12, decimal_places=2, default=0)   # overstock threshold
+    monthly_consumption = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    last_movement_date = models.DateField(null=True, blank=True)
+
+    # hover-card detail attributes
+    description = models.CharField(max_length=255, blank=True)
+    fabric_type = models.CharField(max_length=100, blank=True)
+    material = models.CharField(max_length=100, blank=True)
+    color = models.CharField(max_length=50, blank=True)
+    size = models.CharField(max_length=50, blank=True)
+    pattern = models.CharField(max_length=50, blank=True)
+    quality = models.CharField(max_length=50, blank=True)
+
+    class Meta:
+        verbose_name = 'Stock SKU'
+        verbose_name_plural = 'Stock SKUs'
+        ordering = ['sku_code']
+        constraints = [
+            models.UniqueConstraint(fields=['item', 'sku_code'], name='uniq_item_sku'),
+        ]
+
+    def __str__(self):
+        return self.sku_code

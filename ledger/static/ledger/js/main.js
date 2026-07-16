@@ -137,7 +137,11 @@ const EXPORT_DOC_STYLES = `
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
   th { text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; color: #64748b; }
   b, strong { color: #17469e; }
-  .export-btn, .msg-actions, .page-size-label, .date-filter-controls, .table-count { display: none; }
+  .export-btn, .msg-actions, .page-size-label, .date-filter-controls, .table-count, .sku-hover-card { display: none; }
+  .sku-group { margin-top: 14px; }
+  .sku-group-head { font-size: 13px; margin-bottom: 4px; }
+  .sku-group-head b { color: #17469e; }
+  .sku-group-count { color: #64748b; font-size: 11px; }
   .status-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
   .status-pill.overdue { background: #fde2e2; color: #c23b3b; }
   .status-pill.due_today, .status-pill.low_stock { background: #fff2cc; color: #9a7300; }
@@ -166,7 +170,7 @@ function slugify(text) {
 // even inside sandboxed embedded browsers.
 async function exportBubbleAsPDF(bubbleEl) {
   const clone = bubbleEl.cloneNode(true);
-  clone.querySelectorAll('.msg-actions, .page-size-label, .date-filter-controls').forEach(el => el.remove());
+  clone.querySelectorAll('.msg-actions, .page-size-label, .date-filter-controls, .sku-hover-card').forEach(el => el.remove());
   const title = clone.textContent.trim().slice(0, 60) || 'Ledger Export';
 
   const doc = `<!DOCTYPE html>
@@ -256,24 +260,41 @@ function renderOrderRows(orders) {
       <td>${o.target_date || '—'}</td>
       <td>${fmtMoney(o.value)}</td>
       <td>${fmtMoney(o.pending_value)}</td>
-      <td><span class="status-pill ${o.is_complete ? 'upcoming' : 'due_today'}">${applyLabelOverrides(o.status_label)}</span></td>
     </tr>
   `).join('');
 }
 
-function renderStockRows(items) {
-  return items.map(s => `
-    <tr>
-      <td>${s.name}</td>
-      <td>${s.unit}</td>
-      <td>${s.stock_qty}</td>
-      <td>${s.reorder_level}</td>
-      <td>${s.monthly_consumption}</td>
-      <td>${s.last_movement_date || '—'}</td>
-      <td>${s.preferred_vendor || '—'}</td>
-      <td><span class="status-pill ${s.status}">${s.status_label}</span></td>
-    </tr>
-  `).join('');
+// Inventory is rendered per-item (grouped), with bucket-specific columns that
+// mirror the product spec: Low → Min Qty, Overstock → Max Qty, Dead → Last
+// Movement, Fast → Monthly Use, Negative → none, All/mixed → Min+Max+Status.
+// '__status' is a sentinel that renders the coloured status pill.
+const STOCK_COLUMNS = {
+  negative_stock: [['Qty', 'qty'], ['Unit', 'unit']],
+  low_stock:      [['Qty', 'qty'], ['Unit', 'unit'], ['Min Qty', 'min_qty']],
+  overstock:      [['Qty', 'qty'], ['Unit', 'unit'], ['Max Qty', 'max_qty']],
+  dead_stock:     [['Qty', 'qty'], ['Unit', 'unit'], ['Last Movement', 'last_movement_date']],
+  fast_moving:    [['Qty', 'qty'], ['Unit', 'unit'], ['Monthly Use', 'monthly_consumption']],
+  all:            [['Qty', 'qty'], ['Unit', 'unit'], ['Min Qty', 'min_qty'], ['Max Qty', 'max_qty'], ['Status', '__status']],
+};
+
+function fmtStockValue(sku, field) {
+  if (field === '__status') return `<span class="status-pill ${sku.status}">${sku.status_label}</span>`;
+  const v = sku[field];
+  return (v === null || v === undefined || v === '') ? '—' : escapeHtml(String(v));
+}
+
+// Detail popover shown on hovering a SKU code — built from data already on the
+// row (no extra request). Hidden in the exported PDF.
+function renderSkuHoverCard(sku) {
+  const d = sku.details || {};
+  const fields = [
+    ['Description', d.description], ['Fabric Type', d.fabric_type], ['Material', d.material],
+    ['Color', d.color], ['Size', d.size], ['Pattern', d.pattern], ['Quality', d.quality],
+  ];
+  const rows = fields
+    .map(([label, val]) => `<div class="shc-row"><span>${label}</span><b>${escapeHtml(String(val || '—'))}</b></div>`)
+    .join('');
+  return `<div class="sku-hover-card"><div class="shc-title">${escapeHtml(sku.sku_code)}</div>${rows}</div>`;
 }
 
 function computeTableRows(entry) {
@@ -398,16 +419,58 @@ const TRANSACTION_THEAD = `
   <tr><th>Date</th><th>Type</th><th>Voucher #</th><th>Debit</th><th>Credit</th><th>Status</th></tr>
 `;
 const ORDER_THEAD = `
-  <tr><th>Order #</th><th>Type</th><th>Party</th><th>Order Date</th><th>Target Date</th><th>Value</th><th>Pending</th><th>Status</th></tr>
+  <tr><th>Order #</th><th>Type</th><th>Party</th><th>Order Date</th><th>Target Date</th><th>Value</th><th>Pending</th></tr>
 `;
-const STOCK_THEAD = `
-  <tr><th>Item</th><th>Unit</th><th>Stock Qty</th><th>Reorder Level</th><th>Monthly Use</th><th>Last Movement</th><th>Vendor</th><th>Status</th></tr>
-`;
-
 function buildInvoiceTable(invoices) { return buildPaginatedTable(invoices, renderInvoiceRows, INVOICE_THEAD, 'date'); }
 function buildTransactionTable(entries) { return buildPaginatedTable(entries, renderTransactionRows, TRANSACTION_THEAD, 'date'); }
 function buildOrderTable(orders) { return buildPaginatedTable(orders, renderOrderRows, ORDER_THEAD, 'order_date'); }
-function buildStockTable(items) { return buildPaginatedTable(items, renderStockRows, STOCK_THEAD, 'last_movement_date'); }
+
+// Inventory: group the flat SKU list under its parent item and render one small
+// table per item ("Item name: Kurta" → its SKU rows). When every SKU shares one
+// status the columns match that bucket; a mixed list falls back to the "all"
+// column set.
+function buildStockTable(skus) {
+  if (!skus || !skus.length) return '';
+
+  const statuses = new Set(skus.map(s => s.status));
+  const bucket = statuses.size === 1 ? [...statuses][0] : 'all';
+  const cols = STOCK_COLUMNS[bucket] || STOCK_COLUMNS.all;
+
+  // Group by item, preserving the server's (item, sku_code) sort order.
+  const groups = [];
+  const byItem = new Map();
+  skus.forEach(s => {
+    if (!byItem.has(s.item_name)) {
+      const g = { item_name: s.item_name, skus: [] };
+      byItem.set(s.item_name, g);
+      groups.push(g);
+    }
+    byItem.get(s.item_name).skus.push(s);
+  });
+
+  const thead = `<tr><th>SKU code</th>${cols.map(([label]) => `<th>${label}</th>`).join('')}</tr>`;
+
+  return groups.map(g => {
+    const body = g.skus.map(s => `
+      <tr>
+        <td class="sku-cell">
+          <span class="sku-code">${escapeHtml(s.sku_code)}</span>
+          ${renderSkuHoverCard(s)}
+        </td>
+        ${cols.map(([, field]) => `<td>${fmtStockValue(s, field)}</td>`).join('')}
+      </tr>
+    `).join('');
+    const n = g.skus.length;
+    return `
+      <div class="sku-group">
+        <div class="sku-group-head">Item name: <b>${escapeHtml(g.item_name)}</b>
+          <span class="sku-group-count">(${n} SKU${n === 1 ? '' : 's'})</span>
+        </div>
+        <table class="sku-table"><thead>${thead}</thead><tbody>${body}</tbody></table>
+      </div>
+    `;
+  }).join('');
+}
 
 chatBody.addEventListener('change', (e) => {
   const wrap = e.target.closest('.result-card[data-table-id]');
@@ -521,20 +584,30 @@ function buildCreditStatusCard(data) {
   `;
 }
 
-function buildStockItemCard(item) {
+function buildStockItemCard(sku) {
+  const d = sku.details || {};
   const rows = [
-    ['Unit', item.unit],
-    ['Stock Qty', item.stock_qty],
-    ['Reorder Level', item.reorder_level],
-    ['Monthly Consumption', item.monthly_consumption],
-    ['Last Movement', item.last_movement_date || '—'],
-    ['Preferred Vendor', item.preferred_vendor || '—'],
+    ['Item', sku.item_name],
+    ['Unit', sku.unit],
+    ['Qty', sku.qty],
+    ['Min Qty', sku.min_qty],
+    ['Max Qty', sku.max_qty],
+    ['Monthly Use', sku.monthly_consumption],
+    ['Last Movement', sku.last_movement_date || '—'],
+    ['Preferred Vendor', sku.preferred_vendor || '—'],
+    ['Description', d.description || '—'],
+    ['Fabric Type', d.fabric_type || '—'],
+    ['Material', d.material || '—'],
+    ['Color', d.color || '—'],
+    ['Size', d.size || '—'],
+    ['Pattern', d.pattern || '—'],
+    ['Quality', d.quality || '—'],
   ].map(([label, value]) => `<tr><th>${label}</th><td>${escapeHtml(String(value))}</td></tr>`).join('');
 
   return `
     <div class="record-card"><table><tbody>${rows}</tbody></table></div>
     <div class="info-summary-line">
-      Status: <span class="status-pill ${item.status}">${item.status_label}</span>
+      Status: <span class="status-pill ${sku.status}">${sku.status_label}</span>
     </div>
   `;
 }
@@ -731,7 +804,7 @@ const MODULES = {
     filterPatterns: INVENTORY_FILTER_PATTERNS,
     queryUrl: INVENTORY_QUERY_URL,
     idParam: 'vendor_id',
-    rowsField: 'items',
+    rowsField: 'skus',
     buildTable: buildStockTable,
     dedicatedActions: { info: runLedgerInfo },
     itemSearchUrl: ITEM_SEARCH_URL,
@@ -1169,18 +1242,20 @@ async function fetchItemMatches(itemSearchUrl, q) {
 
 async function presentItemMatches(data, text) {
   if (data.count === 1) {
-    const item = data.matches[0];
+    const sku = data.matches[0];
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's <b>${escapeHtml(item.name)}</b> from Inventory.`)}
-      ${buildStockItemCard(item)}
+      ${renderMarkdownLite(`Here's <b>${escapeHtml(sku.sku_code)}</b> (${escapeHtml(sku.item_name)}) from Inventory.`)}
+      ${buildStockItemCard(sku)}
     `, true);
     showCurrentPebbles();
     return;
   }
 
-  appendBotMessage(`Found <b>${data.count}</b> stock items matching "${escapeHtml(text)}". Which one?`);
+  appendBotMessage(`Found <b>${data.count}</b> SKU(s) matching "${escapeHtml(text)}". Which one?`);
   renderPebbleDock(
-    data.matches.map(m => ({ label: m.name, itemId: m.id, item: m, scopedModuleKey: currentModuleKey })),
+    data.matches.map(m => ({
+      label: `${m.sku_code} · ${m.item_name}`, itemId: m.id, item: m, scopedModuleKey: currentModuleKey,
+    })),
     handlePebbleClick,
   );
 }
@@ -1203,10 +1278,10 @@ async function resolveInventorySearch(module, text, filterKey) {
   }
 }
 
-function renderStockItemBubble(item) {
+function renderStockItemBubble(sku) {
   withExportButton(appendBotMessage('').querySelector('.bubble'), `
-    ${renderMarkdownLite(`Here's <b>${escapeHtml(item.name)}</b> from Inventory.`)}
-    ${buildStockItemCard(item)}
+    ${renderMarkdownLite(`Here's <b>${escapeHtml(sku.sku_code)}</b> (${escapeHtml(sku.item_name)}) from Inventory.`)}
+    ${buildStockItemCard(sku)}
   `, true);
   showCurrentPebbles();
 }

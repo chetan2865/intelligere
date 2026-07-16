@@ -761,3 +761,79 @@ tr.clickable-row:hover td {
 .result-card table {
   margin-top: 4px;
 }
+
+/* ---------------------------------------------------------------------------
+   Inventory: per-item SKU groups + hover detail popover
+   --------------------------------------------------------------------------- */
+.sku-group {
+  margin-top: 14px;
+}
+.sku-group:first-child {
+  margin-top: 6px;
+}
+.sku-group-head {
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+.sku-group-head b {
+  color: var(--accent, #17469e);
+}
+.sku-group-count {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-left: 4px;
+}
+.sku-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.sku-table th,
+.sku-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+/* SKU code cell hosts the hover popover */
+.sku-cell {
+  position: relative;
+  overflow: visible;
+}
+.sku-code {
+  font-weight: 600;
+  cursor: help;
+  border-bottom: 1px dashed var(--text-secondary, #94a3b8);
+}
+.sku-hover-card {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 0;
+  min-width: 230px;
+  padding: 10px 12px;
+  background: var(--bg-panel, #fff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+}
+.sku-cell:hover .sku-hover-card {
+  display: block;
+}
+.shc-title {
+  font-weight: 700;
+  color: var(--accent, #17469e);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.shc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+.shc-row span {
+  color: var(--text-secondary, #64748b);
+}
