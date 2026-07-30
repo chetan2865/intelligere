@@ -13,6 +13,7 @@ from celery_app.models import recPay
 from tallyapp.models import ladgernamedata
 
 from invoice.models import Invoice
+from inventory_management.models import CompanyCredentials, ExpiryProduct, Product
 
 from .models import Ledger
 
@@ -481,6 +482,180 @@ def order_query_api(request):
 # ---------------------------------------------------------------------------
 # Inventory
 # ---------------------------------------------------------------------------
+
+INVENTORY_FILTER_LABELS = {
+    'dead_stock': 'Dead Stock',
+    'negative_stock': 'Negative Stock',
+    'warehouse_stock': 'Warehouse Wise Stock Items',
+    'expired_product': 'Expired Product',
+}
+
+
+def _sku_warehouses(sku):
+    """Warehouse allocations for one SKU, trimmed to what the hover card
+    needs — a SKU can be split across more than one warehouse."""
+    return [
+        {
+            'name': wh.get('name') or 'Unassigned',
+            'qty': wh.get('qty', ''),
+            'address': wh.get('warehouse_address') or '',
+            'contact': wh.get('contact') or '',
+            'email': wh.get('email') or '',
+            'contact_person_name': wh.get('contact_person_name') or '',
+        }
+        for wh in (sku.get('warehouse') or [])
+    ]
+
+
+def _sku_details(sku):
+    """Descriptive fields for the SKU hover card — pulled straight off the
+    sku dict (falling back to its nested sku_detail for a couple of keys)."""
+    detail = sku.get('sku_detail') or {}
+    return {
+        'Fabric Type': sku.get('Fabric Type') or detail.get('Fabric Type'),
+        'Material': sku.get('Material') or detail.get('Material'),
+        'Color': sku.get('Color'),
+        'Size': sku.get('Size'),
+        'Pattern': sku.get('Pattern'),
+        'Quality': sku.get('Quality'),
+        'GSM / Count': sku.get('GSM / Count'),
+        'Quantity': sku.get('Quantity'),
+        'Original Qty': sku.get('original_qty'),
+        'Full SKU Code': sku.get('full_sku_code'),
+    }
+
+
+def _company_deadstock_days():
+    """Map company name -> deadStock threshold (days) from Company credentials."""
+    return dict(
+        CompanyCredentials.objects
+        .exclude(deadStock__isnull=True)
+        .values_list('company__comp_name', 'deadStock')
+    )
+
+
+def _company_negative_flags():
+    """Map company name -> is_negative flag from Company credentials."""
+    return dict(CompanyCredentials.objects.values_list('company__comp_name', 'is_negative'))
+
+
+def _dead_stock_rows():
+    """A product counts as dead stock once its age (from created_at) exceeds
+    the deadStock day-count configured on that company's Company credentials."""
+    today = timezone.localdate()
+    deadstock_days = _company_deadstock_days()
+    rows = []
+    for product in Product.objects.filter(deleted=False).exclude(created_at__isnull=True):
+        threshold = deadstock_days.get(product.company)
+        if threshold is None:
+            continue
+        age_days = (today - product.created_at.date()).days
+        if age_days <= threshold:
+            continue
+        for sku in (product.sku or [{}]):
+            rows.append({
+                'item_name': product.item_name,
+                'company': product.company,
+                'sku_code': sku.get('sku_code', ''),
+                'created_at': product.created_at.date().isoformat(),
+                'age_days': age_days,
+                'deadstock_days': threshold,
+                'details': _sku_details(sku),
+                'warehouses': _sku_warehouses(sku),
+            })
+    return rows
+
+
+def _negative_stock_rows():
+    """Only companies with is_negative enabled on Company credentials get
+    checked; within those, a SKU's warehouse allocation flags itself via its
+    own is_negative key."""
+    negative_flags = _company_negative_flags()
+    rows = []
+    for product in Product.objects.filter(deleted=False):
+        if not negative_flags.get(product.company):
+            continue
+        for sku in (product.sku or []):
+            for wh in (sku.get('warehouse') or []):
+                if wh.get('is_negative'):
+                    rows.append({
+                        'item_name': product.item_name,
+                        'company': product.company,
+                        'sku_code': sku.get('sku_code', ''),
+                        'warehouse_name': wh.get('name', ''),
+                        'qty': wh.get('qty', ''),
+                        'details': _sku_details(sku),
+                        'warehouses': _sku_warehouses(sku),
+                    })
+    return rows
+
+
+def _warehouse_stock_rows():
+    rows = []
+    for product in Product.objects.filter(deleted=False):
+        for sku in (product.sku or []):
+            for wh in (sku.get('warehouse') or []):
+                rows.append({
+                    'warehouse_name': wh.get('name') or 'Unassigned',
+                    'item_name': product.item_name,
+                    'company': product.company,
+                    'sku_code': sku.get('sku_code', ''),
+                    'qty': wh.get('qty', ''),
+                    'details': _sku_details(sku),
+                    'warehouses': _sku_warehouses({'warehouse': [wh]}),
+                })
+    rows.sort(key=lambda r: (r['warehouse_name'], r['item_name'] or ''))
+    return rows
+
+
+def _expired_product_rows():
+    """Same SKU/other_details shape as Product, plus the Amount pulled out of
+    other_details onto its own column."""
+    rows = []
+    for exp in ExpiryProduct.objects.filter(deleted=False):
+        other = exp.other_details if isinstance(exp.other_details, dict) else {}
+        amount = other.get('Amount')
+        for sku in (exp.sku or [{}]):
+            rows.append({
+                'item_name': exp.item_name,
+                'company': exp.company,
+                'sku_code': sku.get('sku_code', ''),
+                'expiry_date': exp.expiry_date.isoformat() if exp.expiry_date else None,
+                'amount': amount,
+                'details': _sku_details(sku),
+                'warehouses': _sku_warehouses(sku),
+            })
+    return rows
+
+
+INVENTORY_ROW_BUILDERS = {
+    'dead_stock': _dead_stock_rows,
+    'negative_stock': _negative_stock_rows,
+    'warehouse_stock': _warehouse_stock_rows,
+    'expired_product': _expired_product_rows,
+}
+
+
+def inventory_query_api(request):
+    filter_key = request.GET.get('type', 'dead_stock')
+    if filter_key not in INVENTORY_FILTER_LABELS:
+        filter_key = 'dead_stock'
+
+    rows = INVENTORY_ROW_BUILDERS[filter_key]()
+    label = INVENTORY_FILTER_LABELS[filter_key]
+
+    if not rows:
+        message = f"No records found for **{label}**."
+    else:
+        message = f"Here's **{label}** — {len(rows)} item(s)."
+
+    return JsonResponse({
+        'filter': filter_key,
+        'message': message,
+        'count': len(rows),
+        'rows': rows,
+    })
+
 
 @require_POST
 def export_pdf_api(request):

@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'tallyapp',
     'celery_app',
     'invoice',
+    'inventory_management',
 ]
 
 MIDDLEWARE = [

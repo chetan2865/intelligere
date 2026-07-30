@@ -762,6 +762,17 @@ tr.clickable-row:hover td {
   margin-top: 4px;
 }
 
+/* Party name in an invoice table — click to jump straight into that
+   company's context instead of typing its name into the composer. */
+.party-link {
+  cursor: pointer;
+  color: var(--accent, #17469e);
+  border-bottom: 1px dashed var(--accent, #17469e);
+}
+.party-link:hover {
+  text-decoration: underline;
+}
+
 /* ---------------------------------------------------------------------------
    Inventory: per-item SKU groups + hover detail popover
    --------------------------------------------------------------------------- */
@@ -819,6 +830,26 @@ tr.clickable-row:hover td {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
 }
 .sku-cell:hover .sku-hover-card {
+  display: block;
+}
+
+/* Warehouse badge(s) shown next to a group header (e.g. "Item name: Kurta") */
+.wh-badge-wrap {
+  position: relative;
+  display: inline-block;
+  margin-left: 6px;
+}
+.wh-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent, #17469e);
+  background: var(--accent-soft, rgba(23, 70, 158, 0.1));
+  border-radius: 999px;
+  padding: 1px 8px;
+  cursor: help;
+}
+.wh-badge-wrap:hover .sku-hover-card {
   display: block;
 }
 .shc-title {

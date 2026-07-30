@@ -209,9 +209,20 @@ async function exportBubbleAsPDF(bubbleEl) {
 
 chatBody.addEventListener('click', (e) => {
   const btn = e.target.closest('.export-btn');
-  if (!btn) return;
-  const bubble = btn.closest('.bubble');
-  if (bubble) exportBubbleAsPDF(bubble);
+  if (btn) {
+    const bubble = btn.closest('.bubble');
+    if (bubble) exportBubbleAsPDF(bubble);
+    return;
+  }
+
+  const partyLink = e.target.closest('.party-link');
+  if (partyLink) {
+    const party = partyLink.textContent.trim();
+    if (!party) return;
+    const filterKey = partyLink.dataset.filter || null;
+    appendUserMessage(party);
+    searchCompanies(party, filterKey);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -223,11 +234,18 @@ const DEFAULT_PAGE_SIZE = 10;
 let tableSeq = 0;
 const tableStore = {};
 
-function renderInvoiceRows(invoices) {
+// Party name is clickable — fires the same company search as typing the name
+// manually, scoped to whichever filter/pebble produced this table, so the
+// user never has to type a company name after seeing it in a table.
+function partyCell(party, filterKey) {
+  return `<span class="party-link" data-filter="${filterKey || ''}">${escapeHtml(party)}</span>`;
+}
+
+function renderInvoiceRows(invoices, filterKey) {
   return invoices.map(inv => `
     <tr>
       <td>${inv.voucher_no}</td>
-      <td>${inv.party}</td>
+      <td>${partyCell(inv.party, filterKey)}</td>
       <td>${inv.date}</td>
       <td>${fmtMoney(inv.amount)}</td>
     </tr>
@@ -237,11 +255,11 @@ function renderInvoiceRows(invoices) {
 // Customer/Supplier Outstanding drop the Type & Status columns — each pebble
 // is already a single party-type, so Type is redundant, and the recPay-backed
 // source behind these two pebbles has no separate reconciliation concept.
-function renderInvoiceRowsCompact(invoices) {
+function renderInvoiceRowsCompact(invoices, filterKey) {
   return invoices.map(inv => `
     <tr>
       <td>${inv.voucher_no}</td>
-      <td>${inv.party}</td>
+      <td>${partyCell(inv.party, filterKey)}</td>
       <td>${inv.date}</td>
       <td>${inv.due_date || '—'}</td>
       <td>${fmtMoney(inv.amount)}</td>
@@ -259,6 +277,92 @@ function renderOrderRows(orders) {
       <td>${fmtMoney(o.value)}</td>
     </tr>
   `).join('');
+}
+
+// Detail popover shown on hovering a SKU code — same pattern as the earlier
+// Inventory design: built from data already on the row (no extra request).
+function renderSkuHoverCard(details, title) {
+  const entries = Object.entries(details || {}).filter(([, v]) => v !== null && v !== undefined && v !== '');
+  const rows = entries
+    .map(([label, val]) => `<div class="shc-row"><span>${escapeHtml(label)}</span><b>${escapeHtml(String(val))}</b></div>`)
+    .join('') || '<div class="shc-row"><span>No extra details</span></div>';
+  return `<div class="sku-hover-card"><div class="shc-title">${escapeHtml(title || '')}</div>${rows}</div>`;
+}
+
+function renderWarehouseHoverCard(wh) {
+  const fields = [
+    ['Qty', wh.qty], ['Address', wh.address], ['Contact', wh.contact],
+    ['Email', wh.email], ['Contact Person', wh.contact_person_name],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== '');
+  const rows = fields
+    .map(([label, val]) => `<div class="shc-row"><span>${escapeHtml(label)}</span><b>${escapeHtml(String(val))}</b></div>`)
+    .join('') || '<div class="shc-row"><span>No extra details</span></div>';
+  return `<div class="sku-hover-card"><div class="shc-title">${escapeHtml(wh.name || 'Warehouse')}</div>${rows}</div>`;
+}
+
+// Every distinct warehouse used by the SKUs in this group, shown as a small
+// badge next to the group header — each with its own hover popover (address/
+// contact/email). Only present when the rows actually carry `warehouses`
+// (dead/negative/expired pebbles group by item; Warehouse Wise Stock already
+// groups by warehouse itself, so its rows don't set this field).
+function renderWarehouseBadges(groupRows) {
+  const seen = new Map();
+  groupRows.forEach((r) => {
+    (r.warehouses || []).forEach((wh) => {
+      if (wh.name && !seen.has(wh.name)) seen.set(wh.name, wh);
+    });
+  });
+  if (!seen.size) return '';
+  return [...seen.values()].map((wh) => `
+    <span class="wh-badge-wrap">
+      <span class="wh-badge">${escapeHtml(wh.name)}</span>
+      ${renderWarehouseHoverCard(wh)}
+    </span>
+  `).join('');
+}
+
+// Groups rows under their parent item/warehouse ("Item name: Kurta" → its SKU
+// rows), each SKU code cell carrying a hover popover with descriptive fields.
+// `columns` is [[label, field, formatterFn?], ...] for whatever extra columns
+// that pebble needs beyond the SKU code itself.
+function buildGroupedSkuTable(rows, groupField, groupLabel, columns) {
+  if (!rows || !rows.length) return '';
+
+  const groups = [];
+  const byKey = new Map();
+  rows.forEach((r) => {
+    const key = r[groupField] || '—';
+    if (!byKey.has(key)) {
+      const g = { key, rows: [] };
+      byKey.set(key, g);
+      groups.push(g);
+    }
+    byKey.get(key).rows.push(r);
+  });
+
+  const thead = `<tr><th>SKU Code</th>${columns.map(([label]) => `<th>${label}</th>`).join('')}</tr>`;
+
+  return groups.map((g) => {
+    const body = g.rows.map((r) => `
+      <tr>
+        <td class="sku-cell">
+          <span class="sku-code">${escapeHtml(r.sku_code || '—')}</span>
+          ${renderSkuHoverCard(r.details, r.sku_code || r.item_name)}
+        </td>
+        ${columns.map(([, field, fmt]) => `<td>${fmt ? fmt(r[field], r) : escapeHtml(String(r[field] ?? '—'))}</td>`).join('')}
+      </tr>
+    `).join('');
+    const n = g.rows.length;
+    return `
+      <div class="sku-group">
+        <div class="sku-group-head">${groupLabel}: <b>${escapeHtml(g.key)}</b>
+          <span class="sku-group-count">(${n} SKU${n === 1 ? '' : 's'})</span>
+          ${renderWarehouseBadges(g.rows)}
+        </div>
+        <table class="sku-table"><thead>${thead}</thead><tbody>${body}</tbody></table>
+      </div>
+    `;
+  }).join('');
 }
 
 function computeTableRows(entry) {
@@ -388,11 +492,37 @@ const ORDER_THEAD = `
 `;
 function buildInvoiceTable(invoices, filterKey) {
   if (COMPACT_INVOICE_FILTERS.has(filterKey)) {
-    return buildPaginatedTable(invoices, renderInvoiceRowsCompact, INVOICE_THEAD_COMPACT, 'date');
+    return buildPaginatedTable(invoices, (rows) => renderInvoiceRowsCompact(rows, filterKey), INVOICE_THEAD_COMPACT, 'date');
   }
-  return buildPaginatedTable(invoices, renderInvoiceRows, INVOICE_THEAD, 'date');
+  return buildPaginatedTable(invoices, (rows) => renderInvoiceRows(rows, filterKey), INVOICE_THEAD, 'date');
 }
 function buildOrderTable(orders) { return buildPaginatedTable(orders, renderOrderRows, ORDER_THEAD, 'order_date'); }
+
+const fmtAmount = (v) => (v !== null && v !== undefined ? fmtMoney(v) : '—');
+
+// Each pebble groups its rows under a different key ("Item name: Kurta" for
+// most, "Warehouse: warehouse 2" for Warehouse Wise Stock) and shows whatever
+// columns are specific to that pebble beyond the SKU code + hover card.
+const INVENTORY_TABLE_CONFIG = {
+  dead_stock: ['item_name', 'Item name', [
+    ['Company', 'company'], ['Created At', 'created_at'], ['Age (days)', 'age_days'], ['Dead Stock (days)', 'deadstock_days'],
+  ]],
+  negative_stock: ['item_name', 'Item name', [
+    ['Company', 'company'], ['Warehouse', 'warehouse_name'], ['Qty', 'qty'],
+  ]],
+  warehouse_stock: ['warehouse_name', 'Warehouse', [
+    ['Item', 'item_name'], ['Qty', 'qty'],
+  ]],
+  expired_product: ['item_name', 'Item name', [
+    ['Company', 'company'], ['Expiry Date', 'expiry_date'], ['Amount', 'amount', fmtAmount],
+  ]],
+};
+function buildInventoryTable(rows, filterKey) {
+  const config = INVENTORY_TABLE_CONFIG[filterKey];
+  if (!config) return '';
+  const [groupField, groupLabel, columns] = config;
+  return buildGroupedSkuTable(rows, groupField, groupLabel, columns);
+}
 
 chatBody.addEventListener('change', (e) => {
   const wrap = e.target.closest('.result-card[data-table-id]');
@@ -515,6 +645,31 @@ const ORDER_FILTER_PATTERNS = [
   { key: 'all', patterns: ['\\ball\\s+orders?\\b', '\\border\\s+book\\b'] },
 ];
 
+// Low Stock / Fast Moving / Overstock have no reliable rule yet (no
+// min/max-qty or consumption-rate field exists anywhere in the real
+// Product data) — they stay as coming-soon placeholders alongside the four
+// pebbles that do have a real backend (Dead Stock / Negative Stock /
+// Warehouse Wise Stock / Expired Product).
+const INVENTORY_PEBBLES = [
+  { key: 'dead_stock', label: 'Dead Stock' },
+  { key: 'negative_stock', label: 'Negative Stock' },
+  { key: 'warehouse_stock', label: 'Warehouse Wise Stock' },
+  { key: 'expired_product', label: 'Expired Product' },
+  { key: 'low_stock', label: 'Low Stock' },
+  { key: 'fast_moving', label: 'Fast Moving' },
+  { key: 'overstock', label: 'Overstock' },
+];
+
+const INVENTORY_FILTER_PATTERNS = [
+  { key: 'negative_stock', patterns: ['\\bnegative\\s+stock\\b'] },
+  { key: 'low_stock', patterns: ['\\blow\\s+stock\\b'] },
+  { key: 'dead_stock', patterns: ['\\bdead\\s+stock\\b'] },
+  { key: 'fast_moving', patterns: ['\\bfast[- ]moving\\b'] },
+  { key: 'overstock', patterns: ['\\bover[- ]?stock\\b'] },
+  { key: 'warehouse_stock', patterns: ['\\bwarehouse(\\s+wise)?\\s+stock\\b', '\\bwarehouse\\b'] },
+  { key: 'expired_product', patterns: ['\\bexpir(?:ed|y)\\s*products?\\b', '\\bexpir(?:ed|y)\\b'] },
+];
+
 const FILLER_PHRASES = [
   'can you show me', 'can you give me', 'could you give me', 'could you show me',
   'i want to know', 'i would like to see', 'i would like', "i'd like",
@@ -610,11 +765,15 @@ const MODULES = {
   inventory: {
     label: 'Inventory',
     shortLabel: 'Inventory',
-    staticPebbles: [],
-    dynamicPebbles: [],
-    filterPatterns: [],
+    staticPebbles: INVENTORY_PEBBLES,
+    dynamicPebbles: INVENTORY_PEBBLES,
+    filterPatterns: INVENTORY_FILTER_PATTERNS,
+    queryUrl: INVENTORY_QUERY_URL,
+    idParam: null,
+    rowsField: 'rows',
+    buildTable: buildInventoryTable,
     dedicatedActions: {},
-    comingSoon: true,
+    comingSoon: new Set(['low_stock', 'fast_moving', 'overstock']),
   },
 };
 
@@ -746,6 +905,35 @@ async function runLedgerInfo() {
   showCurrentPebbles();
 }
 
+// Shared by runModuleQuery and showCompanyOverview's second message — fetches
+// a module's rows for one filter key (optionally scoped to a company) and
+// applies the same client-side voucherType narrowing both call sites need.
+async function fetchModuleResult(filterKey, ledgerId) {
+  const module = MODULES[currentModuleKey];
+  const params = new URLSearchParams({ type: filterKey });
+  if (ledgerId && module.idParam) params.set(module.idParam, ledgerId);
+
+  const res = await fetch(`${module.queryUrl}?${params.toString()}`);
+  const data = await res.json();
+  let rows = data[module.rowsField];
+  let message = data.message;
+
+  // Overdue/Due This Week/High Value have no per-side backend filter, so
+  // narrow to this module's own voucher type client-side and rebuild the
+  // summary line to match (the base 'customer'/'supplier' filter key is
+  // already side-restricted server-side, so it's used as-is).
+  if (module.voucherType && filterKey !== module.baseFilterKey) {
+    rows = rows.filter(r => r.type === module.voucherType);
+    const total = rows.reduce((sum, r) => sum + r.amount, 0);
+    const label = module.dynamicPebbles.find(p => p.key === filterKey)?.label || filterKey;
+    message = rows.length
+      ? `Here's **${label}** — ${rows.length} invoice(s) totalling ${fmtMoney(total)}.`
+      : `No **${label}** invoices found.`;
+  }
+
+  return { rows, message };
+}
+
 async function runModuleQuery(filterKey) {
   const module = MODULES[currentModuleKey];
 
@@ -761,29 +949,9 @@ async function runModuleQuery(filterKey) {
   }
 
   const typingEl = showTyping();
-  const params = new URLSearchParams({ type: filterKey });
-  if (currentLedger) params.set(module.idParam, currentLedger.id);
-
   try {
-    const res = await fetch(`${module.queryUrl}?${params.toString()}`);
-    const data = await res.json();
+    const { rows, message } = await fetchModuleResult(filterKey, currentLedger ? currentLedger.id : null);
     typingEl.remove();
-    let rows = data[module.rowsField];
-    let message = data.message;
-
-    // Overdue/Due This Week/High Value have no per-side backend filter, so
-    // narrow to this module's own voucher type client-side and rebuild the
-    // summary line to match (the base 'customer'/'supplier' filter key is
-    // already side-restricted server-side, so it's used as-is).
-    if (module.voucherType && filterKey !== module.baseFilterKey) {
-      rows = rows.filter(r => r.type === module.voucherType);
-      const total = rows.reduce((sum, r) => sum + r.amount, 0);
-      const label = module.dynamicPebbles.find(p => p.key === filterKey)?.label || filterKey;
-      message = rows.length
-        ? `Here's **${label}** — ${rows.length} invoice(s) totalling ${fmtMoney(total)}.`
-        : `No **${label}** invoices found.`;
-    }
-
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
       ${renderMarkdownLite(applyLabelOverrides(message))}
       ${module.buildTable(rows, filterKey)}
@@ -820,8 +988,8 @@ function dispatchFilterAction(filterKey) {
 
 // Two-message company-focus intro: message 1 is always the shared Complete
 // Ledger card (contact/credit/balance); message 2 is the current module's
-// own "everything for this company" view.
-async function showCompanyOverview(ledgerId, ledgerName) {
+// view for `filterKey` (defaults to the module's base/"everything" view).
+async function showCompanyOverview(ledgerId, ledgerName, filterKey = null) {
   const module = MODULES[currentModuleKey];
 
   const typing1 = showTyping();
@@ -840,16 +1008,12 @@ async function showCompanyOverview(ledgerId, ledgerName) {
 
   const typing2 = showTyping();
   try {
-    const filterKey = module.baseFilterKey || 'all';
-    const params = new URLSearchParams({ type: filterKey });
-    params.set(module.idParam, ledgerId);
-    const res = await fetch(`${module.queryUrl}?${params.toString()}`);
-    const data = await res.json();
+    const effectiveFilterKey = filterKey || module.baseFilterKey || 'all';
+    const { rows, message } = await fetchModuleResult(effectiveFilterKey, ledgerId);
     typing2.remove();
-    const rows = data[module.rowsField];
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
-      ${renderMarkdownLite(applyLabelOverrides(data.message))}
-      ${module.buildTable(rows, filterKey)}
+      ${renderMarkdownLite(applyLabelOverrides(message))}
+      ${module.buildTable(rows, effectiveFilterKey)}
     `, rows.length > 0);
   } catch (err) {
     typing2.remove();
@@ -858,14 +1022,24 @@ async function showCompanyOverview(ledgerId, ledgerName) {
   showCurrentPebbles();
 }
 
+// Dedicated-action filter keys (e.g. Order Book/Inventory's "Ledger Summary")
+// render their own single card via dispatchFilterAction and would be wrong
+// to run through the generic module-query path below; every other filter key
+// — including a specific pebble like "overdue" clicked from a party link —
+// gets the full two-message overview so the Complete Ledger card always shows.
 function enterCompanyContext(ledgerId, ledgerName, filterKey = null) {
   currentLedger = { id: ledgerId, name: ledgerName };
+  const module = MODULES[currentModuleKey];
+
+  if (filterKey && filterKey !== 'reset' && module.dedicatedActions[filterKey]) {
+    dispatchFilterAction(filterKey);
+    return;
+  }
 
   if (filterKey && filterKey !== 'reset') {
-    dispatchFilterAction(filterKey);
-  } else {
-    showCompanyOverview(ledgerId, ledgerName);
+    recordPebbleUsage(currentModuleKey, filterKey);
   }
+  showCompanyOverview(ledgerId, ledgerName, filterKey && filterKey !== 'reset' ? filterKey : null);
 }
 
 function exitCompanyContext() {
