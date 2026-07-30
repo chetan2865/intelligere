@@ -14,9 +14,7 @@ themeToggleBtn.addEventListener('click', () => {
   localStorage.setItem('ledger-theme', next);
 });
 
-// ---------------------------------------------------------------------------
-// Mobile sidebar toggle
-// ---------------------------------------------------------------------------
+
 menuToggleBtn.addEventListener('click', () => {
   sidebar.classList.add('open');
   sidebarOverlay.classList.add('show');
@@ -26,12 +24,6 @@ sidebarOverlay.addEventListener('click', () => {
   sidebarOverlay.classList.remove('show');
 });
 
-// ---------------------------------------------------------------------------
-// Chat primitives
-// ---------------------------------------------------------------------------
-
-// Auto-resize the composer when it's a textarea so users can type multiple
-// lines comfortably. Works for both <input> (no-op) and <textarea>.
 function autoResizeComposer() {
   if (!chatInput) return;
   if (chatInput.tagName.toLowerCase() !== 'textarea') return;
@@ -47,14 +39,15 @@ function escapeHtml(str) {
 }
 
 function renderMarkdownLite(text) {
-  return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  if (!text) return '';
+  const escaped = escapeHtml(text);
+  return escaped
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/&lt;b&gt;/gi, '<b>')
+    .replace(/&lt;\/b&gt;/gi, '</b>');
 }
 
-// The backend's own wording for a couple of filter labels doesn't match the
-// pebble text shown in the UI (e.g. "Open Orders" pebble → "Pending
-// Delivery"). Rather than touch the backend, swap the wording client-side
-// wherever a raw server message gets rendered, so it reads consistently
-// everywhere.
+
 const SERVER_LABEL_OVERRIDES = [
   [/\bOpen Orders\b/g, 'Pending Delivery'],
   [/\bPending Procurement\b/g, 'Yet to Arrive'],
@@ -102,10 +95,6 @@ function showTyping() {
   return wrap;
 }
 
-// Pebbles live in a single dock pinned above the composer (not inline in the
-// chat flow) so they never scroll away with old messages and always reflect
-// whatever's currently available. `bubbles` is an array of
-// { label, ...whatever handlePebbleClick needs to route it }.
 const pebbleDock = document.getElementById('pebbleDock');
 
 function renderPebbleDock(bubbles, onPick) {
@@ -307,9 +296,6 @@ function slugify(text) {
   );
 }
 
-// Builds a standalone HTML document from one bubble's content, converts it to
-// a real PDF server-side via /api/export-pdf/ (xhtml2pdf), and downloads the
-// returned PDF bytes.
 async function exportBubbleAsPDF(bubbleEl) {
   const clone = bubbleEl.cloneNode(true);
 
@@ -421,18 +407,13 @@ chatBody.addEventListener('click', (e) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Paginated tables (Show N entries + date range filter/sort), shared by
-// every module's table (invoices, transactions, orders, stock items).
-// ---------------------------------------------------------------------------
+
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 10;
 let tableSeq = 0;
 const tableStore = {};
 
-// Party name is clickable — fires the same company search as typing the name
-// manually, scoped to whichever filter/pebble produced this table, so the
-// user never has to type a company name after seeing it in a table.
+
 function partyCell(party, filterKey) {
   return `<span class="party-link" data-filter="${filterKey || ''}">${escapeHtml(party)}</span>`;
 }
@@ -448,9 +429,6 @@ function renderInvoiceRows(invoices, filterKey) {
   `).join('');
 }
 
-// Customer/Supplier Outstanding drop the Type & Status columns — each pebble
-// is already a single party-type, so Type is redundant, and the recPay-backed
-// source behind these two pebbles has no separate reconciliation concept.
 function renderInvoiceRowsCompact(invoices, filterKey) {
   return invoices.map(inv => `
     <tr>
@@ -475,8 +453,6 @@ function renderOrderRows(orders) {
   `).join('');
 }
 
-// Detail popover shown on hovering a SKU code — same pattern as the earlier
-// Inventory design: built from data already on the row (no extra request).
 function renderSkuHoverCard(details, title) {
   const entries = Object.entries(details || {}).filter(([, v]) => v !== null && v !== undefined && v !== '');
   const rows = entries
@@ -496,11 +472,6 @@ function renderWarehouseHoverCard(wh) {
   return `<div class="sku-hover-card"><div class="shc-title">${escapeHtml(wh.name || 'Warehouse')}</div>${rows}</div>`;
 }
 
-// Every distinct warehouse used by the SKUs in this group, shown as a small
-// badge next to the group header — each with its own hover popover (address/
-// contact/email). Only present when the rows actually carry `warehouses`
-// (dead/negative/expired pebbles group by item; Warehouse Wise Stock already
-// groups by warehouse itself, so its rows don't set this field).
 function renderWarehouseBadges(groupRows) {
   const seen = new Map();
   groupRows.forEach((r) => {
@@ -517,10 +488,6 @@ function renderWarehouseBadges(groupRows) {
   `).join('');
 }
 
-// Groups rows under their parent item/warehouse ("Item name: Kurta" → its SKU
-// rows), each SKU code cell carrying a hover popover with descriptive fields.
-// `columns` is [[label, field, formatterFn?], ...] for whatever extra columns
-// that pebble needs beyond the SKU code itself.
 function buildGroupedSkuTable(rows, groupField, groupLabel, columns) {
   if (!rows || !rows.length) return '';
 
@@ -1104,7 +1071,7 @@ async function runLedgerInfo() {
     const data = await res.json();
     typingEl.remove();
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's the <b>Ledger Summary</b> for <b>${escapeHtml(data.name)}</b>.`)}
+      ${renderMarkdownLite(`Here's the **Ledger Summary** for **${data.name}**.`)}
       ${buildLedgerInfoCard(data)}
     `, true);
   } catch (err) {
@@ -1207,7 +1174,7 @@ async function showCompanyOverview(ledgerId, ledgerName, filterKey = null) {
     const data = await res.json();
     typing1.remove();
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
-      ${renderMarkdownLite(`Here's the <b>Complete Ledger</b> for <b>${escapeHtml(data.name)}</b>.`)}
+      ${renderMarkdownLite(`Here's the **Complete Ledger** for **${data.name}**.`)}
       ${buildLedgerInfoCard(data)}
     `, true);
   } catch (err) {
