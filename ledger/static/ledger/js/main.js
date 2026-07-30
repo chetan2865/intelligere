@@ -7,10 +7,7 @@ const menuToggleBtn = document.getElementById('menuToggle');
 const sidebar = document.getElementById('sidebar');
 const sidebarOverlay = document.getElementById('sidebarOverlay');
 
-// ---------------------------------------------------------------------------
-// Theme (light/dark) — persisted, applied before first paint by the inline
-// head script in index.html so there's no flash of the wrong theme.
-// ---------------------------------------------------------------------------
+
 themeToggleBtn.addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
@@ -132,24 +129,170 @@ function withExportButton(bubbleEl, html, exportable) {
 }
 
 const EXPORT_DOC_STYLES = `
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 28px; color: #1e293b; }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
-  th { text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; color: #64748b; }
-  b, strong { color: #17469e; }
-  .export-btn, .msg-actions, .page-size-label, .date-filter-controls, .table-count, .sku-hover-card { display: none; }
-  .sku-group { margin-top: 14px; }
-  .sku-group-head { font-size: 13px; margin-bottom: 4px; }
-  .sku-group-head b { color: #17469e; }
-  .sku-group-count { color: #64748b; font-size: 11px; }
-  .status-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-  .status-pill.overdue { background: #fde2e2; color: #c23b3b; }
-  .status-pill.due_today, .status-pill.low_stock { background: #fff2cc; color: #9a7300; }
-  .status-pill.upcoming, .status-pill.normal { background: #e1f4e6; color: #21874b; }
-  .status-pill.dead_stock { background: #eceefb; color: #64748b; }
-  .status-pill.fast_moving { background: #e6e1fb; color: #17469e; }
-  .status-pill.overstock { background: #ffe8d6; color: #b5651d; }
+  @page {
+    size: a4 portrait;
+    margin: 1.5cm 1.2cm 1.8cm 1.2cm;
+    @frame footer_frame {
+      -pdf-frame-content: footer_content;
+      bottom: 0.5cm;
+      left: 1.2cm;
+      right: 1.2cm;
+      height: 0.8cm;
+    }
+  }
+
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    padding: 0;
+    margin: 0;
+    color: #1e293b;
+    font-size: 9.5pt;
+    line-height: 1.45;
+  }
+
+  #footer_content {
+    text-align: right;
+    font-size: 8pt;
+    color: #64748b;
+    border-top: 1px solid #cbd5e1;
+    padding-top: 4px;
+  }
+
+  .pdf-header {
+    border-bottom: 2px solid #1e3a8a;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+
+  .pdf-header-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .pdf-header-table td {
+    border: none !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  .pdf-brand {
+    font-size: 15pt;
+    font-weight: bold;
+    color: #1e3a8a;
+    letter-spacing: 0.5px;
+  }
+
+  .pdf-subtitle {
+    font-size: 8.5pt;
+    color: #64748b;
+    margin-top: 2px;
+  }
+
+  .pdf-meta {
+    text-align: right;
+    font-size: 8.5pt;
+    color: #475569;
+  }
+
+  p {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #1e3a8a;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    font-size: 9.5pt;
+    color: #0f172a;
+  }
+
+  b, strong {
+    color: #1e3a8a;
+    font-weight: bold;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 9pt;
+    margin-top: 10px;
+    margin-bottom: 14px;
+  }
+
+  th {
+    background-color: #0f172a;
+    color: #ffffff;
+    font-size: 8.5pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    padding: 7px 9px;
+    border: 1px solid #0f172a;
+    text-align: left;
+    letter-spacing: 0.3px;
+  }
+
+  td {
+    text-align: left;
+    padding: 6px 9px;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 9pt;
+    color: #334155;
+    vertical-align: middle;
+  }
+
+  tr:nth-child(even) td {
+    background-color: #f8fafc;
+  }
+
+  /* Right align numerical & value columns */
+  th:last-child, td:last-child,
+  .num-cell {
+    text-align: right;
+  }
+
+  .export-btn, .msg-actions, .page-size-label, .date-filter-controls, .table-count, .table-controls, .sku-hover-card, select, button {
+    display: none;
+  }
+
+  .sku-group {
+    margin-top: 12px;
+    margin-bottom: 12px;
+  }
+
+  .sku-group-head {
+    font-size: 9.5pt;
+    font-weight: bold;
+    margin-bottom: 4px;
+    color: #1e293b;
+  }
+
+  .sku-group-head b {
+    color: #1e3a8a;
+  }
+
+  .sku-group-count {
+    color: #64748b;
+    font-size: 8.5pt;
+    font-weight: normal;
+  }
+
+  .status-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 8pt;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  .status-pill.overdue { background: #fee2e2; color: #991b1b; }
+  .status-pill.due_today, .status-pill.low_stock { background: #fef3c7; color: #92400e; }
+  .status-pill.upcoming, .status-pill.normal { background: #dcfce7; color: #166534; }
+  .status-pill.dead_stock { background: #f1f5f9; color: #475569; }
+  .status-pill.fast_moving { background: #e0e7ff; color: #3730a3; }
+  .status-pill.overstock { background: #ffedd5; color: #9a3412; }
+
   .info-summary-line { margin-top: 10px; }
+  .party-link { color: #1e3a8a; font-weight: bold; }
+  a { color: #1e3a8a; text-decoration: none; }
 `;
 
 function getCsrfToken() {
@@ -166,17 +309,70 @@ function slugify(text) {
 
 // Builds a standalone HTML document from one bubble's content, converts it to
 // a real PDF server-side via /api/export-pdf/ (xhtml2pdf), and downloads the
-// returned PDF bytes. Doesn't rely on window.print()/popups, so it works
-// even inside sandboxed embedded browsers.
+// returned PDF bytes.
 async function exportBubbleAsPDF(bubbleEl) {
   const clone = bubbleEl.cloneNode(true);
-  clone.querySelectorAll('.msg-actions, .page-size-label, .date-filter-controls, .sku-hover-card').forEach(el => el.remove());
-  const title = clone.textContent.trim().slice(0, 60) || 'Ledger Export';
+
+  // If there's a table inside that was paginated, render ALL stored rows for full export!
+  const tableCard = bubbleEl.querySelector('[data-table-id]');
+  if (tableCard) {
+    const tableId = tableCard.getAttribute('data-table-id');
+    const entry = tableStore[tableId];
+    if (entry && entry.rows) {
+      const cloneTableBody = clone.querySelector('tbody');
+      if (cloneTableBody && entry.renderRowFn) {
+        const filtered = computeTableRows(entry);
+        cloneTableBody.innerHTML = entry.renderRowFn(filtered);
+      }
+    }
+  }
+
+  // Remove interactive UI controls from clone
+  clone.querySelectorAll('.msg-actions, .table-controls, .page-size-label, .date-filter-controls, .sku-hover-card, .custom-range-fields, select, button').forEach(el => el.remove());
+
+  // Replace ₹ symbol with Rs. and clean dashes in clone
+  let rawContent = clone.innerHTML;
+  rawContent = rawContent.replace(/₹/g, 'Rs. ').replace(/—/g, ' - ').replace(/–/g, ' - ');
+  clone.innerHTML = rawContent;
+
+  const rawText = clone.textContent.trim().replace(/\s+/g, ' ');
+  const titleMatch = rawText.match(/Here's\s+([^\u2014\u2013\-]+)/i);
+  const title = (titleMatch ? titleMatch[0] : rawText.slice(0, 50)) || 'Ledger Export';
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
   const doc = `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml(title)}</title>
 <style>${EXPORT_DOC_STYLES}</style>
-</head><body>${clone.innerHTML}</body></html>`;
+</head>
+<body>
+  <div id="footer_content">
+    Intelligere Business Intelligence &nbsp;|&nbsp; Page <pdf:pagenumber/> of <pdf:pagecount/>
+  </div>
+
+  <div class="pdf-header">
+    <table class="pdf-header-table">
+      <tr>
+        <td align="left">
+          <div class="pdf-brand">INTELLIGERE</div>
+          <div class="pdf-subtitle">Financial Report</div>
+        </td>
+        <td align="right" class="pdf-meta">
+          <strong>Generated:</strong> ${escapeHtml(dateStr)}
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="pdf-body">
+    ${clone.innerHTML}
+  </div>
+</body>
+</html>`;
 
   const filename = `${slugify(title)}.pdf`;
   const btn = bubbleEl.querySelector('.export-btn');
@@ -487,16 +683,29 @@ const INVOICE_THEAD_COMPACT = `
   <tr><th>Voucher #</th><th>Party</th><th>Date</th><th>Due</th><th>Amount</th></tr>
 `;
 const COMPACT_INVOICE_FILTERS = new Set(['customer', 'supplier']);
-const ORDER_THEAD = `
-  <tr><th>Order #</th><th>Type</th><th>Party</th><th>Order Date</th><th>Value</th></tr>
-`;
 function buildInvoiceTable(invoices, filterKey) {
   if (COMPACT_INVOICE_FILTERS.has(filterKey)) {
     return buildPaginatedTable(invoices, (rows) => renderInvoiceRowsCompact(rows, filterKey), INVOICE_THEAD_COMPACT, 'date');
   }
   return buildPaginatedTable(invoices, (rows) => renderInvoiceRows(rows, filterKey), INVOICE_THEAD, 'date');
 }
-function buildOrderTable(orders) { return buildPaginatedTable(orders, renderOrderRows, ORDER_THEAD, 'order_date'); }
+function buildOrderTable(orders, filterKey) {
+  let firstColHeader = 'Order #';
+  if (filterKey === 'sales_orders') {
+    firstColHeader = 'SO No.';
+  } else if (filterKey === 'purchase_orders') {
+    firstColHeader = 'PO No.';
+  } else if (orders && orders.length > 0) {
+    const firstType = orders[0].order_type;
+    if (firstType === 'Purchase') {
+      firstColHeader = 'PO No.';
+    } else if (firstType === 'Sales') {
+      firstColHeader = 'SO No.';
+    }
+  }
+  const thead = `<tr><th>${firstColHeader}</th><th>Type</th><th>Party</th><th>Order Date</th><th>Value</th></tr>`;
+  return buildPaginatedTable(orders, renderOrderRows, thead, 'order_date');
+}
 
 const fmtAmount = (v) => (v !== null && v !== undefined ? fmtMoney(v) : '—');
 
