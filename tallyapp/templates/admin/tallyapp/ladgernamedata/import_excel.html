@@ -1,0 +1,24 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<p>Upload an .xlsx file with a header row. Only <code>ledeger_name</code> is required.</p>
+<p>Recognised columns: <code>ledeger_name</code>, <code>company_name</code> (defaults to your only
+  company if omitted), <code>group_name</code> (created automatically if it doesn't exist),
+  <code>ledeger_phone</code>, <code>ledeger_email</code>, <code>ledeger_address</code>,
+  <code>ledeger_state</code>, <code>ledger_pincode</code>, <code>ledeger_gstin</code>,
+  <code>ledeger_website</code>, <code>ledger_bank</code>, <code>ledger_ifsc</code>,
+  <code>ledger_accno</code>, <code>ledger_sac</code>, <code>gst_rate</code>,
+  <code>created_by</code>, <code>state_code</code>, <code>platform</code>,
+  <code>ledger_gst_reg_type</code>, <code>is_deleted</code> (true/false).</p>
+
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <p>
+    <input type="file" name="importfile" accept=".xlsx" required>
+  </p>
+  <input type="submit" class="default" value="Import">
+  <a href="../" class="button cancel-link">Cancel</a>
+</form>
+{% endblock %}

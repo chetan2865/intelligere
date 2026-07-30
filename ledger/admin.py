@@ -1,8 +1,6 @@
 from django.contrib import admin
 
-from .models import (
-    Ledger, LedgerEntry, LedgerGroup, PurchaseOrder, SalesOrder, StockItem, Voucher,
-)
+from .models import Ledger, LedgerEntry, LedgerGroup, Voucher
 
 
 @admin.register(LedgerGroup)
@@ -54,24 +52,3 @@ class LedgerEntryAdmin(admin.ModelAdmin):
     date_hierarchy = 'date'
 
 
-@admin.register(SalesOrder)
-class SalesOrderAdmin(admin.ModelAdmin):
-    list_display = ('so_number', 'customer', 'order_date', 'dispatch_date', 'order_value', 'pending_value', 'is_dispatched')
-    list_filter = ('is_dispatched',)
-    search_fields = ('so_number', 'customer__name')
-    date_hierarchy = 'order_date'
-
-
-@admin.register(PurchaseOrder)
-class PurchaseOrderAdmin(admin.ModelAdmin):
-    list_display = ('po_number', 'vendor', 'order_date', 'delivery_date', 'value', 'pending_value', 'is_received')
-    list_filter = ('is_received',)
-    search_fields = ('po_number', 'vendor__name')
-    date_hierarchy = 'order_date'
-
-
-@admin.register(StockItem)
-class StockItemAdmin(admin.ModelAdmin):
-    list_display = ('name', 'unit', 'stock_qty', 'reorder_level', 'monthly_consumption', 'last_movement_date', 'preferred_vendor')
-    list_filter = ('preferred_vendor',)
-    search_fields = ('name',)
