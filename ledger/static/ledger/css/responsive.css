@@ -1,34 +1,95 @@
-/* ==========================================================================
-   Intelligere — Responsive Stylesheet
-   Breakpoints:
-     1  ≥ 1440px   Large Desktop / Ultra-wide
-     2  1025–1439  Standard Laptop & Desktop
-     3  ≤ 1024px   iPad Pro / Tablet Landscape  (sidebar becomes drawer)
-     4  ≤ 768px    Portrait Tablet / Large Mobile
-     5  ≤ 480px    Mobile Phones
-     6  ≤ 380px    Very Small Phones (iPhone SE, Galaxy A series)
-     7  touch      Coarse-pointer tap-target overrides
-   ========================================================================== */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  max-width: 100vw;
+  max-height: 100dvh;
+  overflow: hidden !important;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+}
 
-/* --------------------------------------------------------------------------
-   1. Large Desktop & Ultra-Wide (≥ 1440px)
-   -------------------------------------------------------------------------- */
-@media (min-width: 1440px) {
+/* Chat bubble flex container clipping */
+.msg.bot .bubble {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Header title flex shrinking & ellipsis */
+.chat-title-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Scroll indicator cues for scrollable cards */
+.result-card,
+.record-card,
+.sku-table-wrap {
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+@media (min-width: 1920px) {
   .sidebar {
-    width: 280px;
+    width: 290px;
+    padding: 24px 20px;
+  }
+  .chat-header {
+    padding: 20px 40px;
+  }
+  .chat-body {
+    padding: 32px 64px;
+    align-items: center;
+  }
+  .msg {
+    width: 100%;
+    max-width: 1100px;
+  }
+  .chat-input-stack {
+    max-width: 1100px;
+  }
+  .bubble {
+    font-size: 16px;
+    padding: 20px 26px;
+  }
+  table {
+    font-size: 14.5px;
+  }
+}
+
+@media (min-width: 1440px) and (max-width: 1919px) {
+  .sidebar {
+    width: 275px;
     padding: 24px 20px;
   }
   .chat-header {
     padding: 20px 32px;
   }
   .chat-body {
-    padding: 36px 48px 210px;
+    padding: 28px 48px;
   }
   .chat-input-stack {
     max-width: 1000px;
   }
   .msg {
-    max-width: 82%;
+    max-width: 85%;
   }
   .bubble {
     font-size: 15.5px;
@@ -39,9 +100,6 @@
   }
 }
 
-/* --------------------------------------------------------------------------
-   2. Standard Laptop & Desktop (1025px – 1439px)
-   -------------------------------------------------------------------------- */
 @media (min-width: 1025px) and (max-width: 1439px) {
   .sidebar {
     width: 250px;
@@ -53,26 +111,26 @@
     max-width: 88%;
   }
   .chat-body {
-    padding: 32px 28px 190px;
+    padding: 24px 28px;
   }
 }
 
-/* --------------------------------------------------------------------------
-   3. iPad Pro / Tablet Landscape (≤ 1024px) — sidebar becomes off-canvas drawer
-   -------------------------------------------------------------------------- */
 @media (max-width: 1024px) {
-
-  /* ---- Sidebar drawer ---- */
+  /* Sidebar Off-Canvas Drawer */
   .sidebar {
     position: fixed !important;
     top: 0;
     bottom: 0;
     left: 0;
     width: 280px !important;
+    padding-top: max(20px, env(safe-area-inset-top));
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
     box-shadow: var(--shadow);
     transform: translateX(-100%);
     z-index: 1000 !important;
-    transition: transform 0.3s ease;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--bg-sidebar);
   }
   .sidebar.open {
     transform: translateX(0) !important;
@@ -85,97 +143,83 @@
     display: none !important;
   }
 
-  /* ---- Hamburger ---- */
+  /* Hamburger Menu Toggle */
   .menu-toggle {
     display: flex !important;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     border-radius: 8px;
     background: var(--bg-panel);
     border: 1px solid var(--border-color);
-    font-size: 20px;
+    font-size: 18px;
     color: var(--text-primary);
   }
 
-  /* ---- Header ---- */
+  /* Header Layout */
   .chat-header {
-    padding: 12px 16px;
+    padding: max(10px, env(safe-area-inset-top))
+      max(14px, env(safe-area-inset-right)) 10px
+      max(14px, env(safe-area-inset-left));
     gap: 10px;
   }
-  .chat-title {
-    font-size: 15px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-    flex: 1;
-  }
   .company-select {
-    max-width: 160px;
+    max-width: 140px;
     font-size: 12.5px;
-    padding: 6px 8px;
-    margin-right: 4px;
-    flex-shrink: 0;
+    padding: 5px 22px 5px 8px;
+    height: 36px;
   }
-  .theme-toggle {
-    flex-shrink: 0;
+  .header-actions {
+    gap: 6px;
   }
 
-  /* ---- Messages & Bubbles ---- */
-  .msg {
-    max-width: 100% !important;
-    width: 100% !important;
-  }
+  /* Message Layout */
   .msg.bot {
-    align-self: stretch !important;
+    max-width: 100%;
+    align-self: stretch;
   }
   .msg.user {
-    max-width: 88% !important;
-    width: auto !important;
+    max-width: 88%;
   }
   .bubble {
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
     padding: 14px 16px;
     font-size: 14px;
     overflow-wrap: break-word;
     word-break: break-word;
   }
 
-  /* ---- Chat body ---- */
+  /* Chat Body */
   .chat-body {
-    padding: 20px 14px 230px !important;
-    gap: 18px;
+    padding: 18px 16px !important;
+    gap: 16px;
   }
 
-  /* ---- Input bar ---- */
+  /* Input Bar & Wrapper */
   .chat-input-wrapper {
-    padding: 12px 14px 16px;
-    background: linear-gradient(to top, var(--bg-main) 85%, transparent);
-    z-index: 50;
+    padding: 10px max(14px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left));
   }
   .chat-input-stack {
     max-width: 100%;
     gap: 8px;
   }
   .chat-input-bar {
-    padding: 6px 6px 6px 16px;
+    padding: 5px 5px 5px 14px;
   }
   .chat-input-bar textarea,
   .chat-input-bar input {
-    font-size: 15px;
+    font-size: 14.5px;
   }
   .send-btn {
-    width: 40px;
-    height: 40px;
-    font-size: 16px;
+    width: 38px;
+    height: 38px;
+    font-size: 15px;
   }
 
-  /* ---- Pebble dock ---- */
+  /* Pebble Dock */
   .pebble-dock {
     max-height: 84px;
     overflow-y: auto;
@@ -188,30 +232,30 @@
     white-space: nowrap;
   }
 
-  /* ---- Result cards & tables ---- */
-  .result-card {
+  /* Tables & Result Cards */
+  .result-card,
+  .record-card {
     margin: 10px 0;
     border-radius: 10px;
-    width: 100% !important;
-    max-width: 100% !important;
+    width: 100%;
+    max-width: 100%;
   }
   .table-controls {
     flex-wrap: wrap;
     gap: 8px;
     padding: 8px 12px;
-    font-size: 11.5px;
+    font-size: 12px;
     border-bottom: 1px solid var(--border-color);
   }
   .date-filter-controls {
-    flex-direction: column !important;
-    align-items: flex-start !important;
+    flex-wrap: wrap !important;
     gap: 8px !important;
     padding: 8px 12px !important;
-    font-size: 11.5px;
+    font-size: 12px;
     border-bottom: 1px solid var(--border-color);
   }
   .date-filter-controls label {
-    font-size: 11.5px;
+    font-size: 12px;
   }
   .custom-range-fields {
     width: 100% !important;
@@ -221,15 +265,16 @@
   .page-size-select,
   .date-filter-controls input[type="date"],
   .date-filter-controls select {
-    padding: 4px 6px;
-    font-size: 11.5px;
+    padding: 4px 8px;
+    font-size: 12px;
     max-width: 100%;
   }
   table {
     font-size: 12.5px;
-    min-width: 500px;
+    min-width: 480px;
   }
-  th, td {
+  th,
+  td {
     padding: 8px 10px;
   }
   .status-pill {
@@ -238,7 +283,7 @@
   }
   .party-link {
     display: inline-block;
-    max-width: 150px;
+    max-width: 160px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -246,51 +291,25 @@
   }
 }
 
-/* --------------------------------------------------------------------------
-   4. Portrait Tablet & Large Mobile (≤ 768px)
-   -------------------------------------------------------------------------- */
-@media (max-width: 768px) {
-
-  /* ---- Header ---- */
+@media (max-width: 899px) {
   .chat-header {
-    padding: 10px 12px;
+    padding: max(10px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right)) 10px
+      max(12px, env(safe-area-inset-left));
     gap: 8px;
-  }
-  .chat-header .avatar {
-    width: 34px;
-    height: 34px;
-    padding: 4px;
-    flex-shrink: 0;
-  }
-  .chat-title {
-    font-size: 13.5px;
-    max-width: 100px;
   }
   .company-select {
     max-width: 130px;
     font-size: 12px;
-    padding: 5px 7px;
   }
-  .theme-toggle {
-    padding: 6px 8px;
-    font-size: 12px;
-  }
-
-  /* ---- Chat body ---- */
   .chat-body {
-    padding: 16px 10px 220px !important;
-    gap: 16px;
+    padding: 16px 12px !important;
+  }
+  .msg.user {
+    max-width: 90%;
   }
 
-  /* ---- Input bar ---- */
-  .chat-input-wrapper {
-    padding: 10px 10px 12px;
-  }
-  .chat-input-bar {
-    padding: 5px 5px 5px 14px;
-  }
-
-  /* ---- Pebbles: single horizontal scroll row ---- */
+  /* Pebbles horizontal swipe row */
   .pebble-dock {
     flex-wrap: nowrap !important;
     overflow-x: auto !important;
@@ -299,6 +318,7 @@
     justify-content: flex-start !important;
     padding-bottom: 4px;
     scrollbar-width: none;
+    scroll-snap-type: x mandatory;
   }
   .pebble-dock::-webkit-scrollbar {
     display: none;
@@ -307,29 +327,104 @@
     font-size: 12px;
     padding: 6px 12px;
     flex-shrink: 0;
+    scroll-snap-align: start;
   }
 
-  /* ---- Tables ---- */
+  /* SKU hover popover protection */
+  .sku-cell .sku-hover-card,
+  .wh-badge-wrap .sku-hover-card {
+    left: auto;
+    right: 0;
+    min-width: 220px;
+    max-width: calc(100vw - 32px);
+  }
+}
+
+@media (max-width: 600px) {
+  .sidebar {
+    width: 85vw !important;
+    max-width: 310px;
+  }
+  .chat-header {
+    padding: max(8px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right)) 8px
+      max(10px, env(safe-area-inset-left));
+    gap: 6px;
+  }
+  /* Hide duplicate logo avatar in mobile header to give full room to title */
+  .chat-header .avatar {
+    display: none;
+  }
+  .chat-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .company-select {
+    max-width: 115px;
+    font-size: 11.5px;
+    padding: 4px 20px 4px 8px;
+    height: 34px;
+  }
+  .header-actions {
+    gap: 6px;
+  }
+  .header-btn {
+    padding: 6px;
+    width: 34px;
+    height: 34px;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .clear-chat-btn .btn-label {
+    display: none;
+  }
+
+  /* Message styling */
+  .msg {
+    gap: 10px;
+  }
+  .msg.user {
+    max-width: 92%;
+  }
+  .bubble {
+    padding: 12px 14px;
+    font-size: 13.5px;
+    border-radius: 14px;
+  }
+
+  /* Chat Body */
+  .chat-body {
+    padding: 14px 10px !important;
+    gap: 14px;
+  }
+
+  /* Input bar */
+  .chat-input-wrapper {
+    padding: 8px max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+  }
+  .chat-input-bar {
+    padding: 4px 4px 4px 12px;
+  }
+  .chat-input-bar textarea {
+    font-size: 14px;
+  }
+
+  /* Tables */
   table {
-    min-width: 460px;
+    font-size: 12px;
+    min-width: 440px;
+  }
+  th,
+  td {
+    padding: 7px 9px;
   }
   .party-link {
     max-width: 120px;
   }
 
-  /* ---- SKU / warehouse hover cards: flip to right-anchored to avoid edge overflow ---- */
-  .sku-cell .sku-hover-card {
-    left: auto;
-    right: 0;
-    min-width: 200px;
-  }
-  .wh-badge-wrap .sku-hover-card {
-    left: auto;
-    right: 0;
-    min-width: 200px;
-  }
-
-  /* ---- Mini actions wrap ---- */
+  /* Mini Actions */
   .msg-actions {
     flex-wrap: wrap;
     gap: 8px;
@@ -340,52 +435,38 @@
   }
 }
 
-/* --------------------------------------------------------------------------
-   5. Mobile Phones (≤ 480px)
-   -------------------------------------------------------------------------- */
-@media (max-width: 480px) {
-
-  /* ---- Sidebar width ---- */
+@media (max-width: 413px) {
   .sidebar {
     width: 85vw !important;
-    max-width: 300px;
+    max-width: 290px;
   }
-
-  /* ---- Header: tighten everything ---- */
   .chat-header {
-    padding: 8px 10px;
-    gap: 6px;
-  }
-  .chat-header .avatar {
-    width: 30px;
-    height: 30px;
-    padding: 3px;
+    padding: max(6px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right)) 6px
+      max(8px, env(safe-area-inset-left));
+    gap: 5px;
   }
   .chat-title {
-    font-size: 13px;
-    max-width: 80px;
+    font-size: 13.5px;
   }
   .company-select {
     max-width: 100px;
-    font-size: 11.5px;
-    padding: 4px 6px;
-    margin-right: 2px;
+    font-size: 11px;
+    padding: 4px 18px 4px 6px;
+    height: 32px;
   }
-  .theme-toggle {
-    padding: 5px 7px;
+  .header-btn {
+    width: 32px;
+    height: 32px;
+    padding: 4px;
   }
 
-  /* ---- Messages ---- */
-  .msg {
-    gap: 8px;
-  }
-  .msg .avatar {
-    width: 28px;
-    height: 28px;
-    padding: 3px;
+  /* Hide bot avatar on tight mobile rows to give bubble full horizontal space */
+  .msg.bot > .avatar {
+    display: none;
   }
   .msg.user {
-    max-width: 95% !important;
+    max-width: 95%;
   }
   .bubble {
     padding: 10px 12px;
@@ -393,47 +474,49 @@
     border-radius: 12px;
   }
 
-  /* ---- Chat body ---- */
   .chat-body {
-    padding: 12px 8px 210px !important;
-    gap: 14px;
+    padding: 12px 8px !important;
   }
 
-  /* ---- Input ---- */
+  /* Input bar */
   .chat-input-wrapper {
-    padding: 8px 8px 10px;
+    padding: 8px max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
   }
   .chat-input-bar {
     padding: 4px 4px 4px 12px;
   }
   .chat-input-bar textarea {
     font-size: 14px;
-    min-height: 38px;
+    min-height: 36px;
   }
   .send-btn {
-    width: 38px;
-    height: 38px;
-    font-size: 15px;
+    width: 36px;
+    height: 36px;
+    font-size: 14px;
   }
 
-  /* ---- Tables ---- */
+  /* Table styling */
   table {
     font-size: 11.5px;
-    min-width: 420px;
+    min-width: 400px;
   }
-  th, td {
+  th,
+  td {
     padding: 6px 8px;
   }
   .party-link {
-    max-width: 90px;
+    max-width: 100px;
   }
   .status-pill {
     font-size: 10px;
     padding: 1px 6px;
   }
 
-  /* ---- Table controls ---- */
+  /* Filters stack vertically */
   .date-filter-controls {
+    flex-direction: column !important;
+    align-items: stretch !important;
     gap: 6px !important;
     padding: 6px 10px !important;
   }
@@ -446,58 +529,43 @@
     justify-content: space-between;
   }
 
-  /* ---- SKU / inventory ---- */
-  .sku-group-head {
-    font-size: 12px;
-  }
-  .sku-group-count {
-    font-size: 10.5px;
-  }
-  .sku-table th,
-  .sku-table td {
-    padding: 5px 7px;
-    font-size: 11.5px;
-  }
-
-  /* ---- Record card (ledger detail) ---- */
+  /* Record card details */
   .record-card th {
     width: 110px;
-    font-size: 12px;
-  }
-  .record-card td {
-    font-size: 12px;
-  }
-
-  /* ---- Mini actions ---- */
-  .mini-action {
-    padding: 6px 10px;
     font-size: 11.5px;
   }
-
-  /* ---- Sort icons ---- */
-  .sort-icon {
-    font-size: 10px;
+  .record-card td {
+    font-size: 11.5px;
+  }
+  .mini-action {
+    padding: 5px 10px;
+    font-size: 11.5px;
   }
 }
 
-/* --------------------------------------------------------------------------
-   6. Very Small Phones (≤ 380px — iPhone SE, Galaxy A series)
-   -------------------------------------------------------------------------- */
-@media (max-width: 380px) {
-  /* Hide title text to save header space — active module is obvious from context */
+@media (max-width: 360px) {
+  .chat-header {
+    padding: max(4px, env(safe-area-inset-top))
+      max(6px, env(safe-area-inset-right)) 4px
+      max(6px, env(safe-area-inset-left));
+    gap: 4px;
+  }
   .chat-title {
-    display: none;
+    font-size: 13px;
   }
   .company-select {
-    max-width: 110px;
-    font-size: 11px;
+    max-width: 85px;
+    font-size: 10.5px;
+    padding: 3px 16px 3px 4px;
+    height: 30px;
   }
-  .chat-header {
-    gap: 5px;
-    padding: 7px 8px;
+  .header-btn {
+    width: 30px;
+    height: 30px;
+    padding: 3px;
   }
   .chat-body {
-    padding: 10px 6px 200px !important;
+    padding: 10px 6px !important;
   }
   .bubble {
     padding: 8px 10px;
@@ -505,13 +573,14 @@
   }
   table {
     font-size: 11px;
-    min-width: 360px;
+    min-width: 340px;
   }
-  th, td {
+  th,
+  td {
     padding: 5px 6px;
   }
   .pebble {
-    font-size: 11.5px;
+    font-size: 11px;
     padding: 5px 10px;
   }
   .status-pill {
@@ -520,35 +589,45 @@
   }
 }
 
-/* --------------------------------------------------------------------------
-   7. Touch Optimization & Scroll Performance
-   -------------------------------------------------------------------------- */
-.result-card,
-.record-card,
-.chat-body,
-.pebble-dock,
-.modules {
-  -webkit-overflow-scrolling: touch;
+@media (max-height: 500px) and (orientation: landscape) {
+  .chat-header {
+    padding: 4px 12px;
+  }
+  .chat-header .avatar {
+    width: 28px;
+    height: 28px;
+  }
+  .chat-body {
+    padding-top: 10px !important;
+    gap: 12px;
+  }
+  .chat-input-bar textarea {
+    max-height: 60px;
+  }
+  .pebble-dock {
+    max-height: 46px;
+  }
 }
 
-/* Larger tap targets on coarse-pointer (touch) devices */
 @media (pointer: coarse) {
   .module,
   .pebble,
   .mini-action,
   .theme-toggle,
   .menu-toggle,
-  .send-btn {
-    min-height: 40px;
+  .send-btn,
+  .company-select {
+    min-height: 36px;
   }
-  /* Sortable column headers need a comfortable tap area */
   th[data-sort-col] {
     padding-top: 10px;
     padding-bottom: 10px;
   }
-  /* Warehouse & SKU hover cards trigger on tap via :focus-within on mobile */
+  /* Tap to reveal hover popovers on touch screens */
   .sku-cell:focus-within .sku-hover-card,
-  .wh-badge-wrap:focus-within .sku-hover-card {
+  .wh-badge-wrap:focus-within .sku-hover-card,
+  .sku-cell:active .sku-hover-card,
+  .wh-badge-wrap:active .sku-hover-card {
     display: block;
   }
 }

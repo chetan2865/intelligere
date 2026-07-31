@@ -3,24 +3,44 @@ const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
 const chatTitle = document.getElementById("chatTitle");
 const themeToggleBtn = document.getElementById("themeToggle");
+const clearChatBtn = document.getElementById("clearChatBtn");
 const menuToggleBtn = document.getElementById("menuToggle");
 const sidebar = document.getElementById("sidebar");
 const sidebarOverlay = document.getElementById("sidebarOverlay");
 
-themeToggleBtn.addEventListener("click", () => {
-  const next =
-    document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  document.documentElement.dataset.theme = next;
-  localStorage.setItem("ledger-theme", next);
-});
+themeToggleBtn &&
+  themeToggleBtn.addEventListener("click", () => {
+    const next =
+      document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("ledger-theme", next);
+  });
+
+clearChatBtn &&
+  clearChatBtn.addEventListener("click", () => {
+    if (!chatBody) return;
+    chatBody.innerHTML = "";
+    currentLedger = null;
+    if (typeof openModule === "function") {
+      openModule(currentModuleKey, true);
+    }
+  });
+
+function closeSidebarDrawer() {
+  if (sidebar && sidebarOverlay) {
+    sidebar.classList.remove("open");
+    sidebarOverlay.classList.remove("show");
+  }
+}
 
 menuToggleBtn.addEventListener("click", () => {
   sidebar.classList.add("open");
   sidebarOverlay.classList.add("show");
 });
-sidebarOverlay.addEventListener("click", () => {
-  sidebar.classList.remove("open");
-  sidebarOverlay.classList.remove("show");
+sidebarOverlay.addEventListener("click", closeSidebarDrawer);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeSidebarDrawer();
 });
 
 function autoResizeComposer() {
@@ -29,8 +49,29 @@ function autoResizeComposer() {
   chatInput.style.height = "auto";
   const newHeight = Math.min(chatInput.scrollHeight, 200);
   chatInput.style.height = `${newHeight}px`;
+  updateInputWrapperHeight();
 }
 chatInput && chatInput.addEventListener("input", autoResizeComposer);
+
+function updateInputWrapperHeight() {
+  const wrapper = document.querySelector(".chat-input-wrapper");
+  if (wrapper) {
+    const height = wrapper.offsetHeight;
+    document.documentElement.style.setProperty(
+      "--input-wrapper-height",
+      `${height}px`,
+    );
+  }
+}
+
+if (window.ResizeObserver) {
+  const wrapper = document.querySelector(".chat-input-wrapper");
+  if (wrapper) {
+    new ResizeObserver(updateInputWrapperHeight).observe(wrapper);
+  }
+}
+window.addEventListener("resize", updateInputWrapperHeight);
+document.addEventListener("DOMContentLoaded", updateInputWrapperHeight);
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
@@ -124,7 +165,10 @@ const pebbleDock = document.getElementById("pebbleDock");
 
 function renderPebbleDock(bubbles, onPick) {
   pebbleDock.innerHTML = "";
-  if (!bubbles || !bubbles.length) return;
+  if (!bubbles || !bubbles.length) {
+    updateInputWrapperHeight();
+    return;
+  }
   bubbles.forEach((bubble) => {
     const btn = document.createElement("button");
     btn.className = "pebble";
@@ -132,6 +176,7 @@ function renderPebbleDock(bubbles, onPick) {
     btn.onclick = () => onPick(bubble);
     pebbleDock.appendChild(btn);
   });
+  requestAnimationFrame(updateInputWrapperHeight);
 }
 
 const EXPORT_BTN_HTML =
@@ -471,9 +516,12 @@ chatBody.addEventListener("click", (e) => {
     }
     wrap.querySelectorAll("th[data-sort-col] .sort-icon").forEach((el) => {
       const thCol = el.closest("th").dataset.sortCol;
-      el.textContent = thCol === entry.sortColumn
-        ? (entry.sortColumnDir === "asc" ? "↑" : "↓")
-        : "↕";
+      el.textContent =
+        thCol === entry.sortColumn
+          ? entry.sortColumnDir === "asc"
+            ? "↑"
+            : "↓"
+          : "↕";
     });
     refreshTable(wrap.dataset.tableId);
     return;
@@ -636,7 +684,7 @@ function buildGroupedSkuTable(rows, groupField, groupLabel, columns) {
         <div class="sku-group-head">${groupLabel}: ${renderWarehouseBadges(g.rows)}
           <span class="sku-group-count">(${n} SKU${n === 1 ? "" : "s"})</span>
         </div>
-        <table class="sku-table"><thead>${thead}</thead><tbody>${body}</tbody></table>
+        <div class="sku-table-wrap"><table class="sku-table"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
       </div>
     `;
     })
@@ -824,7 +872,12 @@ function buildOrderTable(orders, filterKey) {
     }
   }
   const thead = `<tr><th>${firstColHeader}</th><th>Type</th><th>Order Date</th><th>Value</th></tr>`;
-  return buildPaginatedTable(orders, (rows) => renderOrderRows(rows, filterKey), thead, "order_date");
+  return buildPaginatedTable(
+    orders,
+    (rows) => renderOrderRows(rows, filterKey),
+    thead,
+    "order_date",
+  );
 }
 
 const fmtAmount = (v) => (v !== null && v !== undefined ? fmtMoney(v) : "—");
@@ -1226,7 +1279,7 @@ let currentModuleKey = "customer_outstanding";
 // blended across companies). The dropdown lives in the chat header and is
 // shown only for `companyScoped` modules.
 // ---------------------------------------------------------------------------
-const COMPANY_STORAGE_KEY = 'ledger-company-id';
+const COMPANY_STORAGE_KEY = "ledger-company-id";
 let companies = [];
 let currentCompanyId = null;
 
@@ -1241,20 +1294,28 @@ async function loadCompanies() {
 
   const saved = localStorage.getItem(COMPANY_STORAGE_KEY);
   const savedIsValid = saved && companies.some((c) => String(c.id) === saved);
-  currentCompanyId = savedIsValid ? saved : (companies[0] ? String(companies[0].id) : null);
+  currentCompanyId = savedIsValid
+    ? saved
+    : companies[0]
+      ? String(companies[0].id)
+      : null;
 
   renderCompanySelect();
 }
 
 function renderCompanySelect() {
-  const select = document.getElementById('companySelect');
+  const select = document.getElementById("companySelect");
   if (!select) return;
 
-  select.innerHTML = companies.map((c) => `
-    <option value="${c.id}" ${String(c.id) === String(currentCompanyId) ? 'selected' : ''}>${escapeHtml(c.name)}</option>
-  `).join('');
+  select.innerHTML = companies
+    .map(
+      (c) => `
+    <option value="${c.id}" ${String(c.id) === String(currentCompanyId) ? "selected" : ""}>${escapeHtml(c.name)}</option>
+  `,
+    )
+    .join("");
 
-  select.style.display = '';
+  select.style.display = "";
 }
 
 function switchCompany(companyId) {
@@ -1264,8 +1325,12 @@ function switchCompany(companyId) {
   currentLedger = null;
 
   const module = MODULES[currentModuleKey];
-  const name = companies.find((c) => String(c.id) === currentCompanyId)?.name || 'selected company';
-  appendBotMessage(`Switched to <b>${escapeHtml(name)}</b>. What would you like to see?`);
+  const name =
+    companies.find((c) => String(c.id) === currentCompanyId)?.name ||
+    "selected company";
+  appendBotMessage(
+    `Switched to <b>${escapeHtml(name)}</b>. What would you like to see?`,
+  );
   if (module.baseFilterKey) {
     runModuleQuery(module.baseFilterKey);
   } else {
@@ -1273,7 +1338,7 @@ function switchCompany(companyId) {
   }
 }
 
-document.getElementById('companySelect').addEventListener('change', (e) => {
+document.getElementById("companySelect").addEventListener("change", (e) => {
   switchCompany(e.target.value);
 });
 
@@ -1404,7 +1469,8 @@ async function fetchModuleResult(filterKey, ledgerId) {
   const module = MODULES[currentModuleKey];
   const params = new URLSearchParams({ type: filterKey });
   if (ledgerId && module.idParam) params.set(module.idParam, ledgerId);
-  if (module.companyScoped && currentCompanyId) params.set('company_id', currentCompanyId);
+  if (module.companyScoped && currentCompanyId)
+    params.set("company_id", currentCompanyId);
 
   const res = await fetch(`${module.queryUrl}?${params.toString()}`);
   const data = await res.json();
@@ -1448,10 +1514,17 @@ async function runModuleQuery(filterKey) {
       filterKey,
       currentLedger ? currentLedger.id : null,
     );
-    if (currentModuleKey === "orders" && rows.length > 0 && !message.includes(" for ")) {
+    if (
+      currentModuleKey === "orders" &&
+      rows.length > 0 &&
+      !message.includes(" for ")
+    ) {
       const parties = [...new Set(rows.map((r) => r.party).filter(Boolean))];
       if (parties.length === 1) {
-        message = message.replace(/^(Here's \*\*[^*]+\*\*)/, `$1 for **${parties[0]}**`);
+        message = message.replace(
+          /^(Here's \*\*[^*]+\*\*)/,
+          `$1 for **${parties[0]}**`,
+        );
       }
     }
     typingEl.remove();
@@ -1501,7 +1574,8 @@ async function showCompanyOverview(ledgerId, ledgerName, filterKey = null) {
   const typing1 = showTyping();
   try {
     const detailParams = new URLSearchParams({ ledger_id: ledgerId });
-    if (module.companyScoped && currentCompanyId) detailParams.set('company_id', currentCompanyId);
+    if (module.companyScoped && currentCompanyId)
+      detailParams.set("company_id", currentCompanyId);
     const res = await fetch(`${DETAIL_URL}?${detailParams.toString()}`);
     const data = await res.json();
     typing1.remove();
@@ -1571,7 +1645,8 @@ function exitCompanyContext() {
 async function fetchLedgerMatches(q) {
   const module = MODULES[currentModuleKey];
   const params = new URLSearchParams({ q });
-  if (module.companyScoped && currentCompanyId) params.set('company_id', currentCompanyId);
+  if (module.companyScoped && currentCompanyId)
+    params.set("company_id", currentCompanyId);
   const res = await fetch(`${SEARCH_URL}?${params.toString()}`);
   return res.json();
 }
@@ -1710,9 +1785,8 @@ function openModule(moduleKey, isInitial) {
 document.querySelectorAll(".module").forEach((btn) => {
   btn.addEventListener("click", () => {
     openModule(btn.dataset.module, false);
-    if (window.innerWidth <= 768) {
-      sidebar.classList.remove("open");
-      sidebarOverlay.classList.remove("show");
+    if (window.innerWidth <= 1024) {
+      closeSidebarDrawer();
     }
   });
 });
@@ -1781,9 +1855,11 @@ window.addEventListener("load", async () => {
   // Set up initial module state without auto-fetching data — data loads on user interaction.
   currentModuleKey = "customer_outstanding";
   currentLedger = null;
-  document.querySelectorAll(".module").forEach((b) =>
-    b.classList.toggle("active", b.dataset.module === "customer_outstanding"),
-  );
+  document
+    .querySelectorAll(".module")
+    .forEach((b) =>
+      b.classList.toggle("active", b.dataset.module === "customer_outstanding"),
+    );
   chatTitle.innerText = MODULES["customer_outstanding"].label;
   renderCompanySelect();
   showCurrentPebbles();
