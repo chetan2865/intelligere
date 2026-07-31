@@ -21,8 +21,17 @@ clearChatBtn &&
     if (!chatBody) return;
     chatBody.innerHTML = "";
     currentLedger = null;
-    if (typeof openModule === "function") {
-      openModule(currentModuleKey, true);
+    if (currentModuleKey && MODULES[currentModuleKey]) {
+      const module = MODULES[currentModuleKey];
+      appendBotMessage(
+        `Let's start with <b>${escapeHtml(module.label)}</b>. What would you like to see?`,
+      );
+      showCurrentPebbles();
+    } else {
+      appendBotMessage(
+        "👋 Hi! Please select a module from the sidebar to get started.",
+      );
+      renderPebbleDock([], null);
     }
   });
 
@@ -546,51 +555,42 @@ function partyCell(party, filterKey) {
   return `<span class="party-link" data-filter="${filterKey || ""}">${escapeHtml(party)}</span>`;
 }
 
-function renderInvoiceRows(invoices, filterKey) {
+function renderInvoiceRowsDynamic(
+  invoices,
+  filterKey,
+  { showParty, showDue, showStatus },
+) {
   return invoices
-    .map(
-      (inv) => `
-    <tr>
-      <td>${inv.voucher_no}</td>
-      <td>${partyCell(inv.party, filterKey)}</td>
-      <td>${inv.date}</td>
-      <td>${fmtMoney(inv.amount)}</td>
-      <td>${fmtDueStatus(inv.due_date)}</td>
-    </tr>
-  `,
-    )
+    .map((inv) => {
+      const tds = [`<td>${escapeHtml(inv.voucher_no)}</td>`];
+      if (showParty) {
+        tds.push(`<td>${partyCell(inv.party, filterKey)}</td>`);
+      }
+      tds.push(`<td>${escapeHtml(inv.date)}</td>`);
+      if (showDue) {
+        tds.push(`<td>${escapeHtml(inv.due_date || "—")}</td>`);
+      }
+      tds.push(`<td>${fmtMoney(inv.amount)}</td>`);
+      if (showStatus) {
+        tds.push(`<td>${fmtDueStatus(inv.due_date)}</td>`);
+      }
+      return `<tr>${tds.join("")}</tr>`;
+    })
     .join("");
 }
 
-function renderInvoiceRowsCompact(invoices, filterKey) {
-  return invoices
-    .map(
-      (inv) => `
-    <tr>
-      <td>${inv.voucher_no}</td>
-      <td>${partyCell(inv.party, filterKey)}</td>
-      <td>${inv.date}</td>
-      <td>${inv.due_date || "—"}</td>
-      <td>${fmtMoney(inv.amount)}</td>
-      <td>${fmtDueStatus(inv.due_date)}</td>
-    </tr>
-  `,
-    )
-    .join("");
-}
-
-function renderOrderRows(orders, filterKey) {
+function renderOrderRows(orders, filterKey, hasPartyData) {
   return orders
-    .map(
-      (o) => `
-    <tr>
-      <td>${o.order_no}</td>
-      <td>${o.order_type}</td>
-      <td>${o.order_date}</td>
-      <td>${fmtMoney(o.value)}</td>
-    </tr>
-  `,
-    )
+    .map((o) => {
+      const tds = [`<td>${escapeHtml(o.order_no)}</td>`];
+      if (hasPartyData) {
+        tds.push(`<td>${partyCell(o.party || "—", filterKey)}</td>`);
+      }
+      tds.push(`<td>${escapeHtml(o.order_type)}</td>`);
+      tds.push(`<td>${escapeHtml(o.order_date)}</td>`);
+      tds.push(`<td>${fmtMoney(o.value)}</td>`);
+      return `<tr>${tds.join("")}</tr>`;
+    })
     .join("");
 }
 
@@ -834,26 +834,55 @@ function buildPaginatedTable(rows, renderRowFn, theadHtml, dateField = null) {
   `;
 }
 
-const INVOICE_THEAD = `
-  <tr><th>Voucher #</th><th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th><th>Date</th><th data-sort-col="amount" style="cursor:pointer;user-select:none;">Amount <span class="sort-icon">↕</span></th><th>Status</th></tr>
-`;
-const INVOICE_THEAD_COMPACT = `
-  <tr><th>Voucher #</th><th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th><th>Date</th><th>Due</th><th data-sort-col="amount" style="cursor:pointer;user-select:none;">Amount <span class="sort-icon">↕</span></th><th>Status</th></tr>
-`;
+const STATUS_FILTER_KEYS = new Set([
+  "overdue",
+  "due_this_week",
+  "upcoming",
+  "status",
+  "overdue_only",
+]);
 const COMPACT_INVOICE_FILTERS = new Set(["customer", "supplier"]);
+
 function buildInvoiceTable(invoices, filterKey) {
-  if (COMPACT_INVOICE_FILTERS.has(filterKey)) {
-    return buildPaginatedTable(
-      invoices,
-      (rows) => renderInvoiceRowsCompact(rows, filterKey),
-      INVOICE_THEAD_COMPACT,
-      "date",
+  let showParty = currentLedger === null;
+  if (showParty && invoices && invoices.length > 0) {
+    const firstParty = invoices[0].party;
+    if (invoices.every((inv) => inv.party === firstParty)) {
+      showParty = false;
+    }
+  }
+
+  const showStatus = STATUS_FILTER_KEYS.has(filterKey);
+  const showDue = true;
+
+  const ths = [`<th>Voucher #</th>`];
+  if (showParty) {
+    ths.push(
+      `<th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th>`,
     );
   }
+  ths.push(`<th>Date</th>`);
+  if (showDue) {
+    ths.push(`<th>Due</th>`);
+  }
+  ths.push(
+    `<th data-sort-col="amount" style="cursor:pointer;user-select:none;">Amount <span class="sort-icon">↕</span></th>`,
+  );
+  if (showStatus) {
+    ths.push(`<th>Status</th>`);
+  }
+
+  const theadHtml = `<tr>${ths.join("")}</tr>`;
+
   return buildPaginatedTable(
     invoices,
-    (rows) => renderInvoiceRows(rows, filterKey),
-    INVOICE_THEAD,
+    (rows) =>
+      renderInvoiceRowsDynamic(rows, filterKey, {
+        showParty,
+        showDue,
+        showStatus,
+      }),
+    theadHtml,
     "date",
   );
 }
@@ -871,11 +900,27 @@ function buildOrderTable(orders, filterKey) {
       firstColHeader = "SO No.";
     }
   }
-  const thead = `<tr><th>${firstColHeader}</th><th>Type</th><th>Order Date</th><th>Value</th></tr>`;
+
+  const hasPartyData = orders && orders.some((o) => o.party);
+
+  const ths = [`<th>${firstColHeader}</th>`];
+  if (hasPartyData) {
+    ths.push(
+      `<th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th>`,
+    );
+  }
+  ths.push(`<th>Type</th>`);
+  ths.push(`<th>Order Date</th>`);
+  ths.push(
+    `<th data-sort-col="value" style="cursor:pointer;user-select:none;">Value <span class="sort-icon">↕</span></th>`,
+  );
+
+  const theadHtml = `<tr>${ths.join("")}</tr>`;
+
   return buildPaginatedTable(
     orders,
-    (rows) => renderOrderRows(rows, filterKey),
-    thead,
+    (rows) => renderOrderRows(rows, filterKey, hasPartyData),
+    theadHtml,
     "order_date",
   );
 }
@@ -1270,8 +1315,8 @@ const MODULES = {
 
 // Company currently "in focus" — { id, name } or null when browsing globally.
 let currentLedger = null;
-// Which module's chat context is active.
-let currentModuleKey = "customer_outstanding";
+// Which module's chat context is active. Null initially until user selects a tab.
+let currentModuleKey = null;
 
 // ---------------------------------------------------------------------------
 // Company (tenant) selector — Customer/Supplier Outstanding are each scoped
@@ -1306,6 +1351,12 @@ async function loadCompanies() {
 function renderCompanySelect() {
   const select = document.getElementById("companySelect");
   if (!select) return;
+
+  const module = currentModuleKey ? MODULES[currentModuleKey] : null;
+  if (!module || !module.companyScoped || !companies.length) {
+    select.style.display = "none";
+    return;
+  }
 
   select.innerHTML = companies
     .map(
@@ -1849,19 +1900,16 @@ chatInput.addEventListener("keydown", (e) => {
 
 window.addEventListener("load", async () => {
   appendBotMessage(
-    `👋 Hi! I'm your <b>Intelligere AI Assistant</b>. I'm currently tracking <b>${window.TOTAL_LEDGERS}</b> active ledgers.`,
+    `👋 Hi! I'm your <b>Intelligere AI Assistant</b>. Please select a module from the sidebar to get started.`,
   );
   await loadCompanies();
-  // Set up initial module state without auto-fetching data — data loads on user interaction.
-  currentModuleKey = "customer_outstanding";
+  currentModuleKey = null;
   currentLedger = null;
   document
     .querySelectorAll(".module")
-    .forEach((b) =>
-      b.classList.toggle("active", b.dataset.module === "customer_outstanding"),
-    );
-  chatTitle.innerText = MODULES["customer_outstanding"].label;
+    .forEach((b) => b.classList.remove("active"));
+  chatTitle.innerText = "Intelligere";
   renderCompanySelect();
-  showCurrentPebbles();
+  renderPebbleDock([], null);
   renderSidebarMostUsed();
 });
