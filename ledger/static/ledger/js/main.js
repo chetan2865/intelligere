@@ -62,6 +62,30 @@ function fmtMoney(n) {
   return `₹${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 }
 
+function fmtDueStatus(due_date_str) {
+  if (!due_date_str || due_date_str === "—") return "<span>—</span>";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(due_date_str);
+  due.setHours(0, 0, 0, 0);
+  const days = Math.round((due - today) / 86400000);
+  let cls, label;
+  if (days < 0) {
+    cls = "overdue";
+    label = `${Math.abs(days)}d overdue`;
+  } else if (days === 0) {
+    cls = "due_today";
+    label = "Due Today";
+  } else if (days <= 7) {
+    cls = "low_stock";
+    label = `Due in ${days}d`;
+  } else {
+    cls = "upcoming";
+    label = `Due in ${days}d`;
+  }
+  return `<span class="status-pill ${cls}">${label}</span>`;
+}
+
 function scrollChatToBottom() {
   chatBody.scrollTop = chatBody.scrollHeight;
 }
@@ -432,6 +456,29 @@ chatBody.addEventListener("click", (e) => {
     return;
   }
 
+  const sortTh = e.target.closest("th[data-sort-col]");
+  if (sortTh) {
+    const wrap = sortTh.closest("[data-table-id]");
+    if (!wrap) return;
+    const entry = tableStore[wrap.dataset.tableId];
+    if (!entry) return;
+    const col = sortTh.dataset.sortCol;
+    if (entry.sortColumn === col) {
+      entry.sortColumnDir = entry.sortColumnDir === "asc" ? "desc" : "asc";
+    } else {
+      entry.sortColumn = col;
+      entry.sortColumnDir = "asc";
+    }
+    wrap.querySelectorAll("th[data-sort-col] .sort-icon").forEach((el) => {
+      const thCol = el.closest("th").dataset.sortCol;
+      el.textContent = thCol === entry.sortColumn
+        ? (entry.sortColumnDir === "asc" ? "↑" : "↓")
+        : "↕";
+    });
+    refreshTable(wrap.dataset.tableId);
+    return;
+  }
+
   const partyLink = e.target.closest(".party-link");
   if (partyLink) {
     const party = partyLink.textContent.trim();
@@ -460,6 +507,7 @@ function renderInvoiceRows(invoices, filterKey) {
       <td>${partyCell(inv.party, filterKey)}</td>
       <td>${inv.date}</td>
       <td>${fmtMoney(inv.amount)}</td>
+      <td>${fmtDueStatus(inv.due_date)}</td>
     </tr>
   `,
     )
@@ -476,20 +524,20 @@ function renderInvoiceRowsCompact(invoices, filterKey) {
       <td>${inv.date}</td>
       <td>${inv.due_date || "—"}</td>
       <td>${fmtMoney(inv.amount)}</td>
+      <td>${fmtDueStatus(inv.due_date)}</td>
     </tr>
   `,
     )
     .join("");
 }
 
-function renderOrderRows(orders) {
+function renderOrderRows(orders, filterKey) {
   return orders
     .map(
       (o) => `
     <tr>
       <td>${o.order_no}</td>
       <td>${o.order_type}</td>
-      <td>${o.party || "—"}</td>
       <td>${o.order_date}</td>
       <td>${fmtMoney(o.value)}</td>
     </tr>
@@ -585,9 +633,8 @@ function buildGroupedSkuTable(rows, groupField, groupLabel, columns) {
       const n = g.rows.length;
       return `
       <div class="sku-group">
-        <div class="sku-group-head">${groupLabel}: <b>${escapeHtml(g.key)}</b>
+        <div class="sku-group-head">${groupLabel}: ${renderWarehouseBadges(g.rows)}
           <span class="sku-group-count">(${n} SKU${n === 1 ? "" : "s"})</span>
-          ${renderWarehouseBadges(g.rows)}
         </div>
         <table class="sku-table"><thead>${thead}</thead><tbody>${body}</tbody></table>
       </div>
@@ -609,6 +656,18 @@ function computeTableRows(entry) {
     rows = rows.filter(
       (r) => r[entry.dateField] && r[entry.dateField] <= entry.toDate,
     );
+  }
+  if (entry.sortColumn) {
+    return [...rows].sort((a, b) => {
+      const av = a[entry.sortColumn];
+      const bv = b[entry.sortColumn];
+      if (typeof av === "number" && typeof bv === "number") {
+        return entry.sortColumnDir === "asc" ? av - bv : bv - av;
+      }
+      return entry.sortColumnDir === "asc"
+        ? String(av ?? "").localeCompare(String(bv ?? ""))
+        : String(bv ?? "").localeCompare(String(av ?? ""));
+    });
   }
   return [...rows].sort((a, b) => {
     const av = a[entry.dateField] || "";
@@ -676,6 +735,8 @@ function buildPaginatedTable(rows, renderRowFn, theadHtml, dateField = null) {
     rangePreset: "custom",
     fromDate: "",
     toDate: "",
+    sortColumn: null,
+    sortColumnDir: "asc",
   };
 
   const entry = tableStore[tableId];
@@ -726,10 +787,10 @@ function buildPaginatedTable(rows, renderRowFn, theadHtml, dateField = null) {
 }
 
 const INVOICE_THEAD = `
-  <tr><th>Voucher #</th><th>Party</th><th>Date</th><th>Amount</th></tr>
+  <tr><th>Voucher #</th><th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th><th>Date</th><th data-sort-col="amount" style="cursor:pointer;user-select:none;">Amount <span class="sort-icon">↕</span></th><th>Status</th></tr>
 `;
 const INVOICE_THEAD_COMPACT = `
-  <tr><th>Voucher #</th><th>Party</th><th>Date</th><th>Due</th><th>Amount</th></tr>
+  <tr><th>Voucher #</th><th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th><th>Date</th><th>Due</th><th data-sort-col="amount" style="cursor:pointer;user-select:none;">Amount <span class="sort-icon">↕</span></th><th>Status</th></tr>
 `;
 const COMPACT_INVOICE_FILTERS = new Set(["customer", "supplier"]);
 function buildInvoiceTable(invoices, filterKey) {
@@ -762,8 +823,8 @@ function buildOrderTable(orders, filterKey) {
       firstColHeader = "SO No.";
     }
   }
-  const thead = `<tr><th>${firstColHeader}</th><th>Type</th><th>Party</th><th>Order Date</th><th>Value</th></tr>`;
-  return buildPaginatedTable(orders, renderOrderRows, thead, "order_date");
+  const thead = `<tr><th>${firstColHeader}</th><th>Type</th><th>Order Date</th><th>Value</th></tr>`;
+  return buildPaginatedTable(orders, (rows) => renderOrderRows(rows, filterKey), thead, "order_date");
 }
 
 const fmtAmount = (v) => (v !== null && v !== undefined ? fmtMoney(v) : "—");
@@ -839,6 +900,10 @@ chatBody.addEventListener("change", (e) => {
     entry.toDate = e.target.value;
   } else if (e.target.classList.contains("sort-dir-select")) {
     entry.sortDir = e.target.value;
+    entry.sortColumn = null;
+    wrap.querySelectorAll("th[data-sort-col] .sort-icon").forEach((el) => {
+      el.textContent = "↕";
+    });
   } else {
     return;
   }
@@ -1189,8 +1254,7 @@ function renderCompanySelect() {
     <option value="${c.id}" ${String(c.id) === String(currentCompanyId) ? 'selected' : ''}>${escapeHtml(c.name)}</option>
   `).join('');
 
-  const module = MODULES[currentModuleKey];
-  select.style.display = module && module.companyScoped ? '' : 'none';
+  select.style.display = '';
 }
 
 function switchCompany(companyId) {
@@ -1380,10 +1444,16 @@ async function runModuleQuery(filterKey) {
 
   const typingEl = showTyping();
   try {
-    const { rows, message } = await fetchModuleResult(
+    let { rows, message } = await fetchModuleResult(
       filterKey,
       currentLedger ? currentLedger.id : null,
     );
+    if (currentModuleKey === "orders" && rows.length > 0 && !message.includes(" for ")) {
+      const parties = [...new Set(rows.map((r) => r.party).filter(Boolean))];
+      if (parties.length === 1) {
+        message = message.replace(/^(Here's \*\*[^*]+\*\*)/, `$1 for **${parties[0]}**`);
+      }
+    }
     typingEl.remove();
     withExportButton(
       appendBotMessage("").querySelector(".bubble"),
@@ -1705,9 +1775,17 @@ chatInput.addEventListener("keydown", (e) => {
 
 window.addEventListener("load", async () => {
   appendBotMessage(
-    `👋 Hi! I'm your <b>Ledger AI Assistant</b>. I'm currently tracking <b>${window.TOTAL_LEDGERS}</b> active ledgers. Pick a module on the left, click a pebble below, or just type a question to get started.`,
+    `👋 Hi! I'm your <b>Intelligere AI Assistant</b>. I'm currently tracking <b>${window.TOTAL_LEDGERS}</b> active ledgers.`,
   );
   await loadCompanies();
-  openModule("customer_outstanding", true);
+  // Set up initial module state without auto-fetching data — data loads on user interaction.
+  currentModuleKey = "customer_outstanding";
+  currentLedger = null;
+  document.querySelectorAll(".module").forEach((b) =>
+    b.classList.toggle("active", b.dataset.module === "customer_outstanding"),
+  );
+  chatTitle.innerText = MODULES["customer_outstanding"].label;
+  renderCompanySelect();
+  showCurrentPebbles();
   renderSidebarMostUsed();
 });

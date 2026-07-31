@@ -1,10 +1,17 @@
 /* ==========================================================================
-   Comprehensive Responsive Styles for Intelligere
-   Targeting: PC Desktop, Laptop, iPad Pro, iPad Air/Mini, Tablets, & Mobile
+   Intelligere — Responsive Stylesheet
+   Breakpoints:
+     1  ≥ 1440px   Large Desktop / Ultra-wide
+     2  1025–1439  Standard Laptop & Desktop
+     3  ≤ 1024px   iPad Pro / Tablet Landscape  (sidebar becomes drawer)
+     4  ≤ 768px    Portrait Tablet / Large Mobile
+     5  ≤ 480px    Mobile Phones
+     6  ≤ 380px    Very Small Phones (iPhone SE, Galaxy A series)
+     7  touch      Coarse-pointer tap-target overrides
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
-   1. Large Desktop & Ultra-Wide PC (1440px and up)
+   1. Large Desktop & Ultra-Wide (≥ 1440px)
    -------------------------------------------------------------------------- */
 @media (min-width: 1440px) {
   .sidebar {
@@ -33,7 +40,7 @@
 }
 
 /* --------------------------------------------------------------------------
-   2. Standard Laptop & PC Desktop (1025px to 1439px)
+   2. Standard Laptop & Desktop (1025px – 1439px)
    -------------------------------------------------------------------------- */
 @media (min-width: 1025px) and (max-width: 1439px) {
   .sidebar {
@@ -51,25 +58,84 @@
 }
 
 /* --------------------------------------------------------------------------
-   3. iPad Pro, iPad Air/Mini & All Tablet / Mobile Screens (<= 1024px)
+   3. iPad Pro / Tablet Landscape (≤ 1024px) — sidebar becomes off-canvas drawer
    -------------------------------------------------------------------------- */
 @media (max-width: 1024px) {
-  /* Give message bubbles 100% width on tablets/mobile so tables have full space */
+
+  /* ---- Sidebar drawer ---- */
+  .sidebar {
+    position: fixed !important;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 280px !important;
+    box-shadow: var(--shadow);
+    transform: translateX(-100%);
+    z-index: 1000 !important;
+    transition: transform 0.3s ease;
+  }
+  .sidebar.open {
+    transform: translateX(0) !important;
+  }
+  .sidebar-overlay.show {
+    display: block !important;
+    opacity: 1 !important;
+  }
+  .collapse-btn {
+    display: none !important;
+  }
+
+  /* ---- Hamburger ---- */
+  .menu-toggle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    font-size: 20px;
+    color: var(--text-primary);
+  }
+
+  /* ---- Header ---- */
+  .chat-header {
+    padding: 12px 16px;
+    gap: 10px;
+  }
+  .chat-title {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+  }
+  .company-select {
+    max-width: 160px;
+    font-size: 12.5px;
+    padding: 6px 8px;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+  .theme-toggle {
+    flex-shrink: 0;
+  }
+
+  /* ---- Messages & Bubbles ---- */
   .msg {
     max-width: 100% !important;
     width: 100% !important;
   }
-
   .msg.bot {
-    max-width: 100% !important;
-    width: 100% !important;
     align-self: stretch !important;
   }
-
   .msg.user {
-    max-width: 90% !important;
+    max-width: 88% !important;
+    width: auto !important;
   }
-
   .bubble {
     width: 100% !important;
     min-width: 0 !important;
@@ -80,74 +146,62 @@
     word-break: break-word;
   }
 
-  /* Increase chat body bottom padding so tables clear the input bar & pebbles completely */
+  /* ---- Chat body ---- */
   .chat-body {
-    padding: 20px 16px 230px !important;
+    padding: 20px 14px 230px !important;
+    gap: 18px;
   }
 
-  /* Drawer Navigation for Tablet & Mobile */
-  .menu-toggle {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-color);
-    font-size: 20px;
-    color: var(--text-primary);
+  /* ---- Input bar ---- */
+  .chat-input-wrapper {
+    padding: 12px 14px 16px;
+    background: linear-gradient(to top, var(--bg-main) 85%, transparent);
+    z-index: 50;
   }
-
-  .sidebar {
-    position: fixed !important;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: 280px !important;
-    box-shadow: var(--shadow);
-    transform: translateX(-100%);
-    z-index: 1000 !important;
+  .chat-input-stack {
+    max-width: 100%;
+    gap: 8px;
   }
-
-  .sidebar.open {
-    transform: translateX(0) !important;
+  .chat-input-bar {
+    padding: 6px 6px 6px 16px;
   }
-
-  .sidebar-overlay.show {
-    display: block !important;
-    opacity: 1 !important;
-  }
-
-  .collapse-btn {
-    display: none !important;
-  }
-
-  .chat-header {
-    padding: 12px 16px;
-    gap: 12px;
-  }
-
-  .chat-title {
+  .chat-input-bar textarea,
+  .chat-input-bar input {
     font-size: 15px;
   }
+  .send-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+  }
 
-  /* Filter Controls Wrapping inside Result Cards */
+  /* ---- Pebble dock ---- */
+  .pebble-dock {
+    max-height: 84px;
+    overflow-y: auto;
+    justify-content: flex-start;
+    padding: 2px 0;
+  }
+  .pebble {
+    font-size: 12.5px;
+    padding: 7px 14px;
+    white-space: nowrap;
+  }
+
+  /* ---- Result cards & tables ---- */
   .result-card {
     margin: 10px 0;
     border-radius: 10px;
     width: 100% !important;
     max-width: 100% !important;
   }
-
   .table-controls {
-    flex-wrap: wrap !important;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 8px 12px;
     font-size: 11.5px;
     border-bottom: 1px solid var(--border-color);
   }
-
   .date-filter-controls {
     flex-direction: column !important;
     align-items: flex-start !important;
@@ -156,17 +210,14 @@
     font-size: 11.5px;
     border-bottom: 1px solid var(--border-color);
   }
-
   .date-filter-controls label {
     font-size: 11.5px;
   }
-
   .custom-range-fields {
     width: 100% !important;
     flex-wrap: wrap !important;
     gap: 8px !important;
   }
-
   .page-size-select,
   .date-filter-controls input[type="date"],
   .date-filter-controls select {
@@ -174,18 +225,17 @@
     font-size: 11.5px;
     max-width: 100%;
   }
-
-  /* Tables on Tablet & Mobile */
   table {
     font-size: 12.5px;
-    min-width: 440px;
+    min-width: 500px;
   }
-
   th, td {
     padding: 8px 10px;
   }
-
-  /* Truncate long company names in table cells to keep tables compact */
+  .status-pill {
+    font-size: 10.5px;
+    padding: 2px 7px;
+  }
   .party-link {
     display: inline-block;
     max-width: 150px;
@@ -194,118 +244,284 @@
     text-overflow: ellipsis;
     vertical-align: bottom;
   }
+}
 
-  /* Bottom Floating Input Bar & Pebble Dock */
-  .chat-input-wrapper {
-    padding: 12px 16px 16px;
-    background: linear-gradient(to top, var(--bg-main) 85%, transparent);
-    z-index: 50;
-  }
+/* --------------------------------------------------------------------------
+   4. Portrait Tablet & Large Mobile (≤ 768px)
+   -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
 
-  .chat-input-stack {
-    max-width: 100%;
+  /* ---- Header ---- */
+  .chat-header {
+    padding: 10px 12px;
     gap: 8px;
   }
-
-  .pebble-dock {
-    max-height: 80px;
-    overflow-y: auto;
-    justify-content: flex-start;
-    padding: 2px 0;
+  .chat-header .avatar {
+    width: 34px;
+    height: 34px;
+    padding: 4px;
+    flex-shrink: 0;
+  }
+  .chat-title {
+    font-size: 13.5px;
+    max-width: 100px;
+  }
+  .company-select {
+    max-width: 130px;
+    font-size: 12px;
+    padding: 5px 7px;
+  }
+  .theme-toggle {
+    padding: 6px 8px;
+    font-size: 12px;
   }
 
+  /* ---- Chat body ---- */
+  .chat-body {
+    padding: 16px 10px 220px !important;
+    gap: 16px;
+  }
+
+  /* ---- Input bar ---- */
+  .chat-input-wrapper {
+    padding: 10px 10px 12px;
+  }
+  .chat-input-bar {
+    padding: 5px 5px 5px 14px;
+  }
+
+  /* ---- Pebbles: single horizontal scroll row ---- */
+  .pebble-dock {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    max-height: none !important;
+    justify-content: flex-start !important;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .pebble-dock::-webkit-scrollbar {
+    display: none;
+  }
   .pebble {
     font-size: 12px;
-    padding: 7px 14px;
-    white-space: nowrap;
+    padding: 6px 12px;
+    flex-shrink: 0;
   }
 
-  .chat-input-bar {
-    padding: 6px 6px 6px 16px;
+  /* ---- Tables ---- */
+  table {
+    min-width: 460px;
+  }
+  .party-link {
+    max-width: 120px;
   }
 
-  .chat-input-bar textarea,
-  .chat-input-bar input {
-    font-size: 14px;
+  /* ---- SKU / warehouse hover cards: flip to right-anchored to avoid edge overflow ---- */
+  .sku-cell .sku-hover-card {
+    left: auto;
+    right: 0;
+    min-width: 200px;
+  }
+  .wh-badge-wrap .sku-hover-card {
+    left: auto;
+    right: 0;
+    min-width: 200px;
   }
 
-  .send-btn {
-    width: 40px;
-    height: 40px;
-    font-size: 16px;
+  /* ---- Mini actions wrap ---- */
+  .msg-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .mini-action {
+    padding: 6px 12px;
+    font-size: 12px;
   }
 }
 
 /* --------------------------------------------------------------------------
-   4. Extra Small Mobile Phones (<= 600px)
+   5. Mobile Phones (≤ 480px)
    -------------------------------------------------------------------------- */
-@media (max-width: 600px) {
+@media (max-width: 480px) {
+
+  /* ---- Sidebar width ---- */
   .sidebar {
     width: 85vw !important;
     max-width: 300px;
   }
 
+  /* ---- Header: tighten everything ---- */
   .chat-header {
-    padding: 10px 12px;
+    padding: 8px 10px;
+    gap: 6px;
   }
-
+  .chat-header .avatar {
+    width: 30px;
+    height: 30px;
+    padding: 3px;
+  }
   .chat-title {
-    font-size: 13.5px;
+    font-size: 13px;
+    max-width: 80px;
+  }
+  .company-select {
+    max-width: 100px;
+    font-size: 11.5px;
+    padding: 4px 6px;
+    margin-right: 2px;
+  }
+  .theme-toggle {
+    padding: 5px 7px;
   }
 
-  .chat-body {
-    padding: 14px 10px 220px !important;
-    gap: 14px;
+  /* ---- Messages ---- */
+  .msg {
+    gap: 8px;
   }
-
-  .msg.user {
-    max-width: 95% !important;
-  }
-
   .msg .avatar {
     width: 28px;
     height: 28px;
     padding: 3px;
   }
-
+  .msg.user {
+    max-width: 95% !important;
+  }
   .bubble {
     padding: 10px 12px;
     font-size: 13.5px;
     border-radius: 12px;
   }
 
-  .custom-range-fields {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px !important;
+  /* ---- Chat body ---- */
+  .chat-body {
+    padding: 12px 8px 210px !important;
+    gap: 14px;
   }
 
+  /* ---- Input ---- */
+  .chat-input-wrapper {
+    padding: 8px 8px 10px;
+  }
+  .chat-input-bar {
+    padding: 4px 4px 4px 12px;
+  }
+  .chat-input-bar textarea {
+    font-size: 14px;
+    min-height: 38px;
+  }
+  .send-btn {
+    width: 38px;
+    height: 38px;
+    font-size: 15px;
+  }
+
+  /* ---- Tables ---- */
+  table {
+    font-size: 11.5px;
+    min-width: 420px;
+  }
+  th, td {
+    padding: 6px 8px;
+  }
+  .party-link {
+    max-width: 90px;
+  }
+  .status-pill {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
+  /* ---- Table controls ---- */
+  .date-filter-controls {
+    gap: 6px !important;
+    padding: 6px 10px !important;
+  }
+  .custom-range-fields {
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
   .custom-range-fields label {
     width: 100%;
     justify-content: space-between;
   }
 
-  .party-link {
-    max-width: 110px;
-  }
-
-  table {
+  /* ---- SKU / inventory ---- */
+  .sku-group-head {
     font-size: 12px;
-    min-width: 400px;
+  }
+  .sku-group-count {
+    font-size: 10.5px;
+  }
+  .sku-table th,
+  .sku-table td {
+    padding: 5px 7px;
+    font-size: 11.5px;
   }
 
-  th, td {
-    padding: 7px 8px;
+  /* ---- Record card (ledger detail) ---- */
+  .record-card th {
+    width: 110px;
+    font-size: 12px;
+  }
+  .record-card td {
+    font-size: 12px;
   }
 
+  /* ---- Mini actions ---- */
   .mini-action {
     padding: 6px 10px;
     font-size: 11.5px;
   }
+
+  /* ---- Sort icons ---- */
+  .sort-icon {
+    font-size: 10px;
+  }
 }
 
 /* --------------------------------------------------------------------------
-   5. Touch Optimization & Scrolling Performance
+   6. Very Small Phones (≤ 380px — iPhone SE, Galaxy A series)
+   -------------------------------------------------------------------------- */
+@media (max-width: 380px) {
+  /* Hide title text to save header space — active module is obvious from context */
+  .chat-title {
+    display: none;
+  }
+  .company-select {
+    max-width: 110px;
+    font-size: 11px;
+  }
+  .chat-header {
+    gap: 5px;
+    padding: 7px 8px;
+  }
+  .chat-body {
+    padding: 10px 6px 200px !important;
+  }
+  .bubble {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  table {
+    font-size: 11px;
+    min-width: 360px;
+  }
+  th, td {
+    padding: 5px 6px;
+  }
+  .pebble {
+    font-size: 11.5px;
+    padding: 5px 10px;
+  }
+  .status-pill {
+    font-size: 9.5px;
+    padding: 1px 5px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   7. Touch Optimization & Scroll Performance
    -------------------------------------------------------------------------- */
 .result-card,
 .record-card,
@@ -315,6 +531,7 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Larger tap targets on coarse-pointer (touch) devices */
 @media (pointer: coarse) {
   .module,
   .pebble,
@@ -323,5 +540,15 @@
   .menu-toggle,
   .send-btn {
     min-height: 40px;
+  }
+  /* Sortable column headers need a comfortable tap area */
+  th[data-sort-col] {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  /* Warehouse & SKU hover cards trigger on tap via :focus-within on mobile */
+  .sku-cell:focus-within .sku-hover-card,
+  .wh-badge-wrap:focus-within .sku-hover-card {
+    display: block;
   }
 }
