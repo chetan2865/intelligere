@@ -734,6 +734,7 @@ const MODULES = {
     dedicatedActions: {},
     voucherType: 'Sales',
     baseFilterKey: 'customer',
+    companyScoped: true,
   },
   supplier_outstanding: {
     label: 'Supplier Outstanding',
@@ -748,6 +749,7 @@ const MODULES = {
     dedicatedActions: {},
     voucherType: 'Purchase',
     baseFilterKey: 'supplier',
+    companyScoped: true,
   },
   orders: {
     label: 'Order Book',
@@ -781,6 +783,64 @@ const MODULES = {
 let currentLedger = null;
 // Which module's chat context is active.
 let currentModuleKey = 'customer_outstanding';
+
+// ---------------------------------------------------------------------------
+// Company (tenant) selector — Customer/Supplier Outstanding are each scoped
+// to exactly one companydata row at a time (its own recPay data only; never
+// blended across companies). The dropdown lives in the chat header and is
+// shown only for `companyScoped` modules.
+// ---------------------------------------------------------------------------
+const COMPANY_STORAGE_KEY = 'ledger-company-id';
+let companies = [];
+let currentCompanyId = null;
+
+async function loadCompanies() {
+  try {
+    const res = await fetch(COMPANIES_URL);
+    const data = await res.json();
+    companies = data.companies || [];
+  } catch (err) {
+    companies = [];
+  }
+
+  const saved = localStorage.getItem(COMPANY_STORAGE_KEY);
+  const savedIsValid = saved && companies.some((c) => String(c.id) === saved);
+  currentCompanyId = savedIsValid ? saved : (companies[0] ? String(companies[0].id) : null);
+
+  renderCompanySelect();
+}
+
+function renderCompanySelect() {
+  const select = document.getElementById('companySelect');
+  if (!select) return;
+
+  select.innerHTML = companies.map((c) => `
+    <option value="${c.id}" ${String(c.id) === String(currentCompanyId) ? 'selected' : ''}>${escapeHtml(c.name)}</option>
+  `).join('');
+
+  const module = MODULES[currentModuleKey];
+  select.style.display = module && module.companyScoped ? '' : 'none';
+}
+
+function switchCompany(companyId) {
+  if (String(companyId) === String(currentCompanyId)) return;
+  currentCompanyId = String(companyId);
+  localStorage.setItem(COMPANY_STORAGE_KEY, currentCompanyId);
+  currentLedger = null;
+
+  const module = MODULES[currentModuleKey];
+  const name = companies.find((c) => String(c.id) === currentCompanyId)?.name || 'selected company';
+  appendBotMessage(`Switched to <b>${escapeHtml(name)}</b>. What would you like to see?`);
+  if (module.baseFilterKey) {
+    runModuleQuery(module.baseFilterKey);
+  } else {
+    showCurrentPebbles();
+  }
+}
+
+document.getElementById('companySelect').addEventListener('change', (e) => {
+  switchCompany(e.target.value);
+});
 
 // Every pebble is stamped with the module/company context it was rendered
 // under. Chat history keeps old pebble rows around indefinitely, and their
@@ -912,6 +972,7 @@ async function fetchModuleResult(filterKey, ledgerId) {
   const module = MODULES[currentModuleKey];
   const params = new URLSearchParams({ type: filterKey });
   if (ledgerId && module.idParam) params.set(module.idParam, ledgerId);
+  if (module.companyScoped && currentCompanyId) params.set('company_id', currentCompanyId);
 
   const res = await fetch(`${module.queryUrl}?${params.toString()}`);
   const data = await res.json();
@@ -994,7 +1055,9 @@ async function showCompanyOverview(ledgerId, ledgerName, filterKey = null) {
 
   const typing1 = showTyping();
   try {
-    const res = await fetch(`${DETAIL_URL}?ledger_id=${ledgerId}`);
+    const detailParams = new URLSearchParams({ ledger_id: ledgerId });
+    if (module.companyScoped && currentCompanyId) detailParams.set('company_id', currentCompanyId);
+    const res = await fetch(`${DETAIL_URL}?${detailParams.toString()}`);
     const data = await res.json();
     typing1.remove();
     withExportButton(appendBotMessage('').querySelector('.bubble'), `
@@ -1052,7 +1115,10 @@ function exitCompanyContext() {
 // inventory item-name search.
 // ---------------------------------------------------------------------------
 async function fetchLedgerMatches(q) {
-  const res = await fetch(`${SEARCH_URL}?q=${encodeURIComponent(q)}`);
+  const module = MODULES[currentModuleKey];
+  const params = new URLSearchParams({ q });
+  if (module.companyScoped && currentCompanyId) params.set('company_id', currentCompanyId);
+  const res = await fetch(`${SEARCH_URL}?${params.toString()}`);
   return res.json();
 }
 
@@ -1159,6 +1225,7 @@ function openModule(moduleKey, isInitial) {
   document.querySelectorAll('.module').forEach(b => b.classList.toggle('active', b.dataset.module === moduleKey));
   const module = MODULES[moduleKey];
   chatTitle.innerText = module.label;
+  renderCompanySelect();
 
   const intro = isInitial
     ? `Let's start with <b>${escapeHtml(module.label)}</b>. What would you like to see?`
@@ -1244,10 +1311,11 @@ chatInput.addEventListener('keydown', (e) => {
   }
 });
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   appendBotMessage(
     `👋 Hi! I'm your <b>Ledger AI Assistant</b>. I'm currently tracking <b>${window.TOTAL_LEDGERS}</b> active ledgers. Pick a module on the left, click a pebble below, or just type a question to get started.`,
   );
+  await loadCompanies();
   openModule('customer_outstanding', true);
   renderSidebarMostUsed();
 });

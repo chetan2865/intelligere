@@ -10,7 +10,7 @@ from django.views.decorators.http import require_POST
 from xhtml2pdf import pisa
 
 from celery_app.models import recPay
-from tallyapp.models import ladgernamedata
+from tallyapp.models import companydata, ladgernamedata
 
 from invoice.models import Invoice
 from inventory_management.models import CompanyCredentials, ExpiryProduct, Product
@@ -53,8 +53,11 @@ AGING_BUCKETS = [
 # pk is the `ledger_id` used throughout this module.
 # ---------------------------------------------------------------------------
 
-def _company_recpay():
-    return recPay.objects.select_related('company').order_by('id').first()
+def _company_recpay(company_id=None):
+    qs = recPay.objects.select_related('company')
+    if company_id:
+        qs = qs.filter(company_id=company_id)
+    return qs.order_by('id').first()
 
 
 def _parse_recpay_date(value):
@@ -125,9 +128,9 @@ def _scope_recpay_data(data, party):
     return {party: data[party]} if data and party in data else {}
 
 
-def _recpay_outstanding_rows(filter_key, party=None):
+def _recpay_outstanding_rows(filter_key, party=None, company_id=None):
     today = timezone.localdate()
-    recpay = _company_recpay()
+    recpay = _company_recpay(company_id)
     if not recpay:
         return [], today
 
@@ -160,9 +163,9 @@ def _recpay_outstanding_rows(filter_key, party=None):
     return rows, today
 
 
-def _recpay_paid_rows(party=None):
+def _recpay_paid_rows(party=None, company_id=None):
     today = timezone.localdate()
-    recpay = _company_recpay()
+    recpay = _company_recpay(company_id)
     if not recpay:
         return [], today
 
@@ -189,9 +192,9 @@ def _recpay_paid_rows(party=None):
 # data for a resolved party comes from celery_app.recPay.
 # ---------------------------------------------------------------------------
 
-def _recpay_party_invoices(party):
+def _recpay_party_invoices(party, company_id=None):
     """All invoices (open + settled) for a party from rec_data/pay_data, each tagged Sales/Purchase."""
-    recpay = _company_recpay()
+    recpay = _company_recpay(company_id)
     if not recpay:
         return []
     rows = []
@@ -206,22 +209,22 @@ def _recpay_party_invoices(party):
     return rows
 
 
-def _recpay_party_stats(party):
+def _recpay_party_stats(party, company_id=None):
     """(outstanding_count, outstanding_total, overdue_count) for one party.
 
     Checks both rec_data and pay_data rather than trusting the ladgernamedata
     group label — a party only ever appears in one of the two, and many
     imported ledgers don't have a group set at all.
     """
-    rows, _ = _recpay_outstanding_rows('all', party=party)
+    rows, _ = _recpay_outstanding_rows('all', party=party, company_id=company_id)
     total = sum(r['amount'] for r in rows)
     overdue_count = sum(1 for r in rows if r['status'] == 'overdue')
     return len(rows), total, overdue_count
 
 
-def _recpay_last_transaction_date(party):
+def _recpay_last_transaction_date(party, company_id=None):
     """Most recent invoice bill date for a party across recPay's rec_data and pay_data."""
-    recpay = _company_recpay()
+    recpay = _company_recpay(company_id)
     if not recpay:
         return None
     dates = []
@@ -256,17 +259,19 @@ def query_api(request):
     if filter_key not in FILTER_KEYS:
         filter_key = 'all'
 
+    company_id = request.GET.get('company_id') or None
     ledger_id = request.GET.get('ledger_id') or None
     ledger_name = None
     if ledger_id:
-        ledger_name = ladgernamedata.objects.filter(
-            pk=ledger_id, is_deleted=False,
-        ).values_list('ledeger_name', flat=True).first()
+        ledger_qs = ladgernamedata.objects.filter(pk=ledger_id, is_deleted=False)
+        if company_id:
+            ledger_qs = ledger_qs.filter(company_id=company_id)
+        ledger_name = ledger_qs.values_list('ledeger_name', flat=True).first()
 
     if filter_key == 'paid':
-        rows, today = _recpay_paid_rows(party=ledger_name)
+        rows, today = _recpay_paid_rows(party=ledger_name, company_id=company_id)
     else:
-        rows, today = _recpay_outstanding_rows(filter_key, party=ledger_name)
+        rows, today = _recpay_outstanding_rows(filter_key, party=ledger_name, company_id=company_id)
 
     return JsonResponse({
         'filter': filter_key,
@@ -279,12 +284,26 @@ def query_api(request):
     })
 
 
+def companies_api(request):
+    companies = companydata.objects.order_by('comp_name').values('id', 'comp_name')
+    return JsonResponse({
+        'companies': [
+            {'id': c['id'], 'name': c['comp_name'] or f"Company #{c['id']}"}
+            for c in companies
+        ],
+    })
+
+
 def ledger_search_api(request):
     query = request.GET.get('q', '').strip()
+    company_id = request.GET.get('company_id') or None
     matches = []
     if query:
+        ledgers_qs = ladgernamedata.objects.filter(is_deleted=False)
+        if company_id:
+            ledgers_qs = ledgers_qs.filter(company_id=company_id)
         ledgers = (
-            ladgernamedata.objects.filter(is_deleted=False)
+            ledgers_qs
             .filter(
                 Q(ledeger_name__icontains=query)
                 | Q(ledeger_gstin__icontains=query)
@@ -309,12 +328,16 @@ def ledger_search_api(request):
 
 def ledger_detail_api(request):
     ledger_id = request.GET.get('ledger_id')
-    ledger = ladgernamedata.objects.filter(pk=ledger_id, is_deleted=False).select_related('ledeger_group').first()
+    company_id = request.GET.get('company_id') or None
+    ledger_qs = ladgernamedata.objects.filter(pk=ledger_id, is_deleted=False)
+    if company_id:
+        ledger_qs = ledger_qs.filter(company_id=company_id)
+    ledger = ledger_qs.select_related('ledeger_group').first()
     if not ledger:
         return JsonResponse({'error': 'Ledger not found'}, status=404)
 
     group = ledger.ledeger_group.group_name if ledger.ledeger_group else ''
-    outstanding_count, outstanding_total, overdue_count = _recpay_party_stats(ledger.ledeger_name)
+    outstanding_count, outstanding_total, overdue_count = _recpay_party_stats(ledger.ledeger_name, company_id=company_id)
 
     return JsonResponse({
         'id': ledger.pk,
@@ -324,7 +347,7 @@ def ledger_detail_api(request):
         'email': ledger.ledeger_email or '',
         'address': ledger.ledeger_address or '',
         'gstin': ledger.ledeger_gstin or '',
-        'last_transaction_date': _recpay_last_transaction_date(ledger.ledeger_name),
+        'last_transaction_date': _recpay_last_transaction_date(ledger.ledeger_name, company_id=company_id),
         'outstanding_count': outstanding_count,
         'outstanding_total': outstanding_total,
         'overdue_count': overdue_count,
@@ -333,12 +356,16 @@ def ledger_detail_api(request):
 
 def ledger_aging_api(request):
     ledger_id = request.GET.get('ledger_id')
-    ledger = ladgernamedata.objects.filter(pk=ledger_id, is_deleted=False).select_related('ledeger_group').first()
+    company_id = request.GET.get('company_id') or None
+    ledger_qs = ladgernamedata.objects.filter(pk=ledger_id, is_deleted=False)
+    if company_id:
+        ledger_qs = ledger_qs.filter(company_id=company_id)
+    ledger = ledger_qs.select_related('ledeger_group').first()
     if not ledger:
         return JsonResponse({'error': 'Ledger not found'}, status=404)
 
     ledger_name = ledger.ledeger_name
-    rows, today = _recpay_outstanding_rows('all', party=ledger_name)
+    rows, today = _recpay_outstanding_rows('all', party=ledger_name, company_id=company_id)
 
     buckets = []
     for label, low, high in AGING_BUCKETS:
@@ -371,13 +398,17 @@ def ledger_aging_api(request):
 
 def ledger_transactions_api(request):
     ledger_id = request.GET.get('ledger_id')
+    company_id = request.GET.get('company_id') or None
     limit = int(request.GET.get('limit', 100))
-    ledger = ladgernamedata.objects.filter(pk=ledger_id, is_deleted=False).first()
+    ledger_qs = ladgernamedata.objects.filter(pk=ledger_id, is_deleted=False)
+    if company_id:
+        ledger_qs = ledger_qs.filter(company_id=company_id)
+    ledger = ledger_qs.first()
     if not ledger:
         return JsonResponse({'error': 'Ledger not found'}, status=404)
 
     party = ledger.ledeger_name
-    invoices = sorted(_recpay_party_invoices(party), key=lambda r: r['date_obj'] or date.min)
+    invoices = sorted(_recpay_party_invoices(party, company_id=company_id), key=lambda r: r['date_obj'] or date.min)
 
     rows = []
     running_balance = 0.0

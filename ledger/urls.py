@@ -7,6 +7,7 @@ app_name = 'ledger'
 urlpatterns = [
     path('', views.chat_view, name='chat'),
     path('api/query/', views.query_api, name='query_api'),
+    path('api/companies/', views.companies_api, name='companies_api'),
     path('api/search-ledger/', views.ledger_search_api, name='ledger_search_api'),
     path('api/ledger-detail/', views.ledger_detail_api, name='ledger_detail_api'),
     path('api/ledger-aging/', views.ledger_aging_api, name='ledger_aging_api'),

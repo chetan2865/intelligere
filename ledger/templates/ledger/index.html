@@ -148,6 +148,7 @@
           <div>
             <div class="chat-title" id="chatTitle">Outstanding Invoices</div>
           </div>
+          <select class="company-select" id="companySelect" style="display: none"></select>
           <button
             class="theme-toggle"
             id="themeToggle"
@@ -212,6 +213,7 @@
     <script>
       window.TOTAL_LEDGERS = "{{ ledger_count|escapejs }}";
       const QUERY_URL = "{% url 'ledger:query_api' %}";
+      const COMPANIES_URL = "{% url 'ledger:companies_api' %}";
       const SEARCH_URL = "{% url 'ledger:ledger_search_api' %}";
       const DETAIL_URL = "{% url 'ledger:ledger_detail_api' %}";
       const AGING_URL = "{% url 'ledger:ledger_aging_api' %}";
