@@ -706,6 +706,19 @@ def export_pdf_api(request):
     if not filename.lower().endswith('.pdf'):
         filename += '.pdf'
 
+    # Sanitize HTML for xhtml2pdf compatibility to prevent black square '■' glyph issues
+    html = html.replace('₹', 'Rs. ')
+    html = html.replace('—', ' - ').replace('–', ' - ').replace('…', '...')
+    html = html.replace('•', '*')
+
+    # Filter out any remaining non-Latin1 characters (ord > 255) such as emojis
+    # so xhtml2pdf built-in fonts (Helvetica) never produce '■' black boxes.
+    cleaned_chars = []
+    for char in html:
+        if ord(char) <= 255:
+            cleaned_chars.append(char)
+    html = "".join(cleaned_chars)
+
     buffer = io.BytesIO()
     result = pisa.CreatePDF(src=html, dest=buffer)
     if result.err:
@@ -714,3 +727,4 @@ def export_pdf_api(request):
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+

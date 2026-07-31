@@ -17,10 +17,10 @@
         document.documentElement.dataset.theme = theme;
       })();
     </script>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/png" href="{% static 'ledger/logo.png' %}?v={% now 'U' %}" />
+    <link rel="shortcut icon" type="image/png" href="{% static 'ledger/logo.png' %}?v={% now 'U' %}" />
+    <link rel="apple-touch-icon" href="{% static 'ledger/logo.png' %}?v={% now 'U' %}" />
     <link rel="stylesheet" href="{% static 'ledger/css/style.css' %}?v={% now 'U' %}" />
     <link rel="stylesheet" href="{% static 'ledger/css/responsive.css' %}?v={% now 'U' %}" />
   </head>
@@ -31,7 +31,7 @@
         <div class="brand">
           <div class="brand-mark">
             <img
-              src="{% static 'ledger/logo.jpeg' %}"
+              src="{% static 'ledger/logo.png' %}"
               alt="Logo"
               class="brand-logo"
               onerror="this.style.display = 'none'"
@@ -135,7 +135,7 @@
           <button class="menu-toggle" id="menuToggle">☰</button>
           <div class="avatar">
             <img
-              src="{% static 'ledger/logo.jpeg' %}"
+              src="{% static 'ledger/logo.png' %}"
               alt="Logo"
               style="
                 width: 100%;
@@ -221,7 +221,7 @@
       const ORDER_QUERY_URL = "{% url 'ledger:order_query_api' %}";
       const INVENTORY_QUERY_URL = "{% url 'ledger:inventory_query_api' %}";
       const EXPORT_PDF_URL = "{% url 'ledger:export_pdf_api' %}";
-      const LOGO_URL = "{% static 'ledger/logo.jpeg' %}";
+      const LOGO_URL = "{% static 'ledger/logo.png' %}";
     </script>
     <script src="{% static 'ledger/js/main.js' %}?v={% now 'U' %}"></script>
   </body>
