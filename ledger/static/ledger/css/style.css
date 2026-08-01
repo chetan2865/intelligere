@@ -908,34 +908,48 @@ tr.clickable-row:hover td {
   border-bottom: 1px solid var(--border, #e2e8f0);
 }
 
-/* SKU code cell hosts the hover popover */
+/* SKU code cell & Warehouse badge popovers */
 .sku-cell {
   position: relative;
-  overflow: visible;
 }
 .sku-code {
   font-weight: 600;
-  cursor: help;
-  border-bottom: 1px dashed var(--text-secondary, #94a3b8);
+  cursor: pointer;
+  border-bottom: 1.5px dashed var(--accent, #17469e);
+  color: var(--accent, #17469e);
+  transition: color 0.15s ease;
 }
-.sku-hover-card {
-  display: none;
-  position: absolute;
-  z-index: 30;
-  top: 100%;
-  left: 0;
-  min-width: 230px;
-  padding: 10px 12px;
-  background: var(--bg-panel, #fff);
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
-}
-.sku-cell:hover .sku-hover-card {
-  display: block;
+.sku-code:hover {
+  color: var(--accent-2, #2563eb);
 }
 
-/* Warehouse badge(s) shown next to a group header (e.g. "Item name: Kurta") */
+/* Hidden template card inside cells/badges */
+.sku-hover-card {
+  display: none !important;
+}
+
+/* Global Portal Popover floating on document.body */
+.global-sku-popover {
+  display: none;
+  position: fixed;
+  z-index: 999999;
+  min-width: 240px;
+  max-width: 340px;
+  padding: 12px 14px;
+  background: var(--bg-panel, #ffffff);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.28);
+  pointer-events: auto;
+}
+
+[data-theme="dark"] .global-sku-popover {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.75);
+}
+
+/* Warehouse badge(s) shown next to a group header */
 .wh-badge-wrap {
   position: relative;
   display: inline-block;
@@ -949,10 +963,7 @@ tr.clickable-row:hover td {
   background: var(--accent-soft, rgba(23, 70, 158, 0.1));
   border-radius: 999px;
   padding: 1px 8px;
-  cursor: help;
-}
-.wh-badge-wrap:hover .sku-hover-card {
-  display: block;
+  cursor: pointer;
 }
 .shc-title {
   font-weight: 700;

@@ -16,23 +16,32 @@ themeToggleBtn &&
     localStorage.setItem("ledger-theme", next);
   });
 
+function resetAppToDefaultState() {
+  if (chatBody) {
+    chatBody.innerHTML = "";
+  }
+  currentModuleKey = null;
+  currentLedger = null;
+
+  document
+    .querySelectorAll(".module")
+    .forEach((b) => b.classList.remove("active"));
+
+  if (chatTitle) {
+    chatTitle.innerText = "Intelligere";
+  }
+
+  renderCompanySelect();
+  renderPebbleDock([], null);
+
+  appendBotMessage(
+    "👋 Hi! I'm your <b>Intelligere AI Assistant</b>. Please select a module from the sidebar to get started.",
+  );
+}
+
 clearChatBtn &&
   clearChatBtn.addEventListener("click", () => {
-    if (!chatBody) return;
-    chatBody.innerHTML = "";
-    currentLedger = null;
-    if (currentModuleKey && MODULES[currentModuleKey]) {
-      const module = MODULES[currentModuleKey];
-      appendBotMessage(
-        `Let's start with <b>${escapeHtml(module.label)}</b>. What would you like to see?`,
-      );
-      showCurrentPebbles();
-    } else {
-      appendBotMessage(
-        "👋 Hi! Please select a module from the sidebar to get started.",
-      );
-      renderPebbleDock([], null);
-    }
+    resetAppToDefaultState();
   });
 
 function closeSidebarDrawer() {
@@ -543,8 +552,103 @@ chatBody.addEventListener("click", (e) => {
     const filterKey = partyLink.dataset.filter || null;
     appendUserMessage(party);
     searchCompanies(party, filterKey);
+    return;
   }
+
+  const skuTrigger = e.target.closest(".sku-cell, .wh-badge-wrap");
+  if (skuTrigger) {
+    e.stopPropagation();
+    if (
+      activePopoverTrigger === skuTrigger &&
+      globalSkuPopover.style.display === "block"
+    ) {
+      hideGlobalPopover();
+    } else {
+      showGlobalPopover(skuTrigger);
+    }
+    return;
+  }
+  hideGlobalPopover();
 });
+
+// ---------------------------------------------------------------------------
+// Global Unclipped Floating Portal Popover for Inventory SKUs & Warehouses
+// ---------------------------------------------------------------------------
+let globalSkuPopover = document.getElementById("globalSkuPopover");
+if (!globalSkuPopover) {
+  globalSkuPopover = document.createElement("div");
+  globalSkuPopover.id = "globalSkuPopover";
+  globalSkuPopover.className = "global-sku-popover";
+  document.body.appendChild(globalSkuPopover);
+}
+
+let activePopoverTrigger = null;
+
+function showGlobalPopover(triggerEl) {
+  const cardTemplate = triggerEl.querySelector(".sku-hover-card");
+  if (!cardTemplate) return;
+
+  activePopoverTrigger = triggerEl;
+  globalSkuPopover.innerHTML = cardTemplate.innerHTML;
+  globalSkuPopover.style.display = "block";
+  globalSkuPopover.style.visibility = "hidden";
+
+  const rect = triggerEl.getBoundingClientRect();
+  const popRect = globalSkuPopover.getBoundingClientRect();
+
+  let top = rect.top - popRect.height - 8;
+  if (top < 10) {
+    top = rect.bottom + 8;
+  }
+
+  let left = rect.left;
+  if (left + popRect.width > window.innerWidth - 16) {
+    left = window.innerWidth - popRect.width - 16;
+  }
+  if (left < 16) left = 16;
+
+  globalSkuPopover.style.top = `${top}px`;
+  globalSkuPopover.style.left = `${left}px`;
+  globalSkuPopover.style.visibility = "visible";
+}
+
+function hideGlobalPopover() {
+  if (globalSkuPopover) {
+    globalSkuPopover.style.display = "none";
+    globalSkuPopover.style.visibility = "hidden";
+  }
+  activePopoverTrigger = null;
+}
+
+if (chatBody) {
+  chatBody.addEventListener("mouseover", (e) => {
+    const trigger = e.target.closest(".sku-cell, .wh-badge-wrap");
+    if (trigger && trigger !== activePopoverTrigger) {
+      showGlobalPopover(trigger);
+    }
+  });
+
+  chatBody.addEventListener("mouseout", (e) => {
+    const trigger = e.target.closest(".sku-cell, .wh-badge-wrap");
+    if (trigger) {
+      const related = e.relatedTarget;
+      if (
+        related &&
+        (trigger.contains(related) || globalSkuPopover.contains(related))
+      ) {
+        return;
+      }
+      hideGlobalPopover();
+    }
+  });
+}
+
+globalSkuPopover.addEventListener("mouseleave", () => {
+  hideGlobalPopover();
+});
+
+window.addEventListener("scroll", hideGlobalPopover, true);
+window.addEventListener("resize", hideGlobalPopover);
 
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 10;
@@ -679,9 +783,12 @@ function buildGroupedSkuTable(rows, groupField, groupLabel, columns) {
         )
         .join("");
       const n = g.rows.length;
+      const badges = renderWarehouseBadges(g.rows);
+      const showKeyText = groupField !== "warehouse_name";
+      const keyHtml = showKeyText ? ` <b>${escapeHtml(g.key)}</b>` : "";
       return `
       <div class="sku-group">
-        <div class="sku-group-head">${groupLabel}: ${renderWarehouseBadges(g.rows)}
+        <div class="sku-group-head">${groupLabel}:${keyHtml} ${badges}
           <span class="sku-group-count">(${n} SKU${n === 1 ? "" : "s"})</span>
         </div>
         <div class="sku-table-wrap"><table class="sku-table"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
@@ -841,14 +948,17 @@ const STATUS_FILTER_KEYS = new Set([
   "status",
   "overdue_only",
 ]);
+const PARTY_TAB_FILTERS = new Set(["overdue", "due_this_week", "overdue_only"]);
 const COMPACT_INVOICE_FILTERS = new Set(["customer", "supplier"]);
 
 function buildInvoiceTable(invoices, filterKey) {
-  let showParty = currentLedger === null;
-  if (showParty && invoices && invoices.length > 0) {
+  let showParty = false;
+  if (PARTY_TAB_FILTERS.has(filterKey)) {
+    showParty = true;
+  } else if (currentLedger === null && invoices && invoices.length > 0) {
     const firstParty = invoices[0].party;
-    if (invoices.every((inv) => inv.party === firstParty)) {
-      showParty = false;
+    if (!invoices.every((inv) => inv.party === firstParty)) {
+      showParty = true;
     }
   }
 
@@ -1352,8 +1462,7 @@ function renderCompanySelect() {
   const select = document.getElementById("companySelect");
   if (!select) return;
 
-  const module = currentModuleKey ? MODULES[currentModuleKey] : null;
-  if (!module || !module.companyScoped || !companies.length) {
+  if (!companies || !companies.length) {
     select.style.display = "none";
     return;
   }
@@ -1899,17 +2008,7 @@ chatInput.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("load", async () => {
-  appendBotMessage(
-    `👋 Hi! I'm your <b>Intelligere AI Assistant</b>. Please select a module from the sidebar to get started.`,
-  );
   await loadCompanies();
-  currentModuleKey = null;
-  currentLedger = null;
-  document
-    .querySelectorAll(".module")
-    .forEach((b) => b.classList.remove("active"));
-  chatTitle.innerText = "Intelligere";
-  renderCompanySelect();
-  renderPebbleDock([], null);
+  resetAppToDefaultState();
   renderSidebarMostUsed();
 });

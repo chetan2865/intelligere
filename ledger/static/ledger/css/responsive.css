@@ -617,17 +617,9 @@ body {
   .menu-toggle,
   .send-btn,
   .company-select {
-    min-height: 36px;
-  }
+  /* Touch optimization for table headers */
   th[data-sort-col] {
     padding-top: 10px;
     padding-bottom: 10px;
-  }
-  /* Tap to reveal hover popovers on touch screens */
-  .sku-cell:focus-within .sku-hover-card,
-  .wh-badge-wrap:focus-within .sku-hover-card,
-  .sku-cell:active .sku-hover-card,
-  .wh-badge-wrap:active .sku-hover-card {
-    display: block;
   }
 }
