@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -80,13 +81,33 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
+#
+# `default` is the live Intelligere Postgres backend — all backend data
+# (companies, ledgers, invoices, inventory) is read straight from it at request
+# time. There is no local mirror.
+#
+# `local` is a dev-only SQLite file holding just what Postgres does not have:
+# Django's auth/session/admin tables and the `ledger` app's own tables.
+# ledgerproject.dbrouter decides which model goes where.
 
 DATABASES = {
     'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'HOST': os.environ.get('REMOTE_DB_HOST', '15.207.57.26'),
+        'PORT': os.environ.get('REMOTE_DB_PORT', '5432'),
+        'NAME': os.environ.get('REMOTE_DB_NAME', 'intelligere-stage'),
+        'USER': os.environ.get('REMOTE_DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('REMOTE_DB_PASSWORD', 'asdfghjkl'),
+        'CONN_MAX_AGE': 60,
+        'OPTIONS': {'connect_timeout': 15},
+    },
+    'local': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    },
 }
+
+DATABASE_ROUTERS = ['ledgerproject.dbrouter.RemoteBackendRouter']
 
 
 # Password validation

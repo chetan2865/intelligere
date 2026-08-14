@@ -49,7 +49,7 @@ class CompanyCredentialsForm(forms.ModelForm):
 class CompanyCredentialsAdmin(admin.ModelAdmin):
     form = CompanyCredentialsForm
     list_display = ('user', 'company', 'created_at', 'industry_type', 'businessType', 'is_negative', 'fifo_lifo')
-    search_fields = ('user', 'company__comp_name')
+    search_fields = ('company__comp_name',)
     list_filter = ("fifo_lifo", "industry_type", 'is_negative', 'businessType')
     readonly_fields = ("pdf_format",)
     list_per_page = 100
@@ -58,7 +58,7 @@ class CompanyCredentialsAdmin(admin.ModelAdmin):
 @admin.register(Warehouse)
 class WarehouseAdmin(admin.ModelAdmin):
     list_display = ('user', 'company', 'name', 'contact', 'email', 'contact_person_name', 'state_name', 'is_manufacturing_plant')
-    search_fields = ('user', 'name', 'company', 'warehouse_address', 'contact_person_name')
+    search_fields = ('name', 'company', 'warehouse_address', 'contact_person_name')
     list_per_page = 100
 
 

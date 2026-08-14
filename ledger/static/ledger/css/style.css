@@ -923,6 +923,13 @@ tr.clickable-row:hover td {
   color: var(--accent-2, #2563eb);
 }
 
+/* Rank column on the Fast/Slow Moving tables. */
+.rank-cell {
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text-secondary, #64748b);
+}
+
 /* Hidden template card inside cells/badges */
 .sku-hover-card {
   display: none !important;

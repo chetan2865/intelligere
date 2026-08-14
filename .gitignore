@@ -5,3 +5,6 @@ db.sqlite3
 
 # collectstatic build output (regenerated on every Railway deploy)
 /staticfiles/
+
+# Claude Code local permissions (machine-specific)
+.claude/settings.local.json

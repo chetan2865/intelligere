@@ -7,7 +7,9 @@ def default_sku_pattern():
 
 
 class CompanyCredentials(models.Model):
-    user = models.CharField(max_length=100, null=True, blank=True)
+    # Backend column is user_id, an FK to the backend's own accountapp_user
+    # table. That app does not exist here, so it is read as a plain id.
+    user = models.IntegerField(db_column='user_id', null=True, blank=True)
     company = models.OneToOneField(companydata, on_delete=models.CASCADE)
     other_details = models.JSONField(null=True, blank=True, default=list)
     sku_pattern = models.JSONField(default=default_sku_pattern, blank=True, null=True)
@@ -35,7 +37,9 @@ class CompanyCredentials(models.Model):
 
 
 class Warehouse(models.Model):
-    user = models.CharField(max_length=100, null=True, blank=True)
+    # Backend column is user_id, an FK to the backend's own accountapp_user
+    # table. That app does not exist here, so it is read as a plain id.
+    user = models.IntegerField(db_column='user_id', null=True, blank=True)
     company = models.CharField(max_length=100, blank=True, null=True)
     name = models.CharField(max_length=100, blank=True, null=True)
     warehouse_address = models.TextField(blank=True, null=True)

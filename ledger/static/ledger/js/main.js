@@ -1065,6 +1065,19 @@ const INVENTORY_TABLE_CONFIG = {
       ["Qty", "qty"],
     ],
   ],
+  // Grouped by warehouse, same as Warehouse Wise Stock — a SKU can be low in
+  // one warehouse while fine in another, so the warehouse is the heading.
+  low_stock: [
+    "warehouse_name",
+    "Warehouse",
+    [
+      ["Item", "item_name"],
+      ["Company", "company"],
+      ["Qty", "qty"],
+      ["Minimum Qty", "min_qty"],
+      ["Short By", "shortfall"],
+    ],
+  ],
   expired_product: [
     "item_name",
     "Item name",
@@ -1074,8 +1087,48 @@ const INVENTORY_TABLE_CONFIG = {
       ["Amount", "amount", fmtAmount],
     ],
   ],
+  overstock: [
+    "item_name",
+    "Item name",
+    [
+      ["Company", "company"],
+      ["Qty", "qty"],
+      ["Maximum Qty", "max_qty"],
+      ["Excess", "excess"],
+    ],
+  ],
 };
+
+// Fast/Slow Moving come from invoice lines, not the product table, so they
+// have no SKU or warehouse to group by — they render as a flat ranking.
+function buildMovementTable(rows) {
+  if (!rows || !rows.length) return "";
+  const body = rows
+    .map(
+      (r) => `
+      <tr>
+        <td class="rank-cell">#${r.rank}</td>
+        <td>${escapeHtml(String(r.item_name ?? "—"))}</td>
+        <td>${escapeHtml(String(r.qty_sold ?? "—"))}</td>
+        <td>${fmtAmount(r.amount)}</td>
+        <td>${escapeHtml(String(r.invoice_lines ?? "—"))}</td>
+      </tr>
+    `,
+    )
+    .join("");
+  const thead =
+    "<tr><th>Rank</th><th>Product</th><th>Qty Sold</th><th>Amount</th><th>Invoice Lines</th></tr>";
+  return `
+    <div class="sku-group">
+      <table class="sku-table"><thead>${thead}</thead><tbody>${body}</tbody></table>
+    </div>
+  `;
+}
+
 function buildInventoryTable(rows, filterKey) {
+  if (filterKey === "fast_moving" || filterKey === "slow_moving") {
+    return buildMovementTable(rows);
+  }
   const config = INVENTORY_TABLE_CONFIG[filterKey];
   if (!config) return "";
   const [groupField, groupLabel, columns] = config;
@@ -1234,6 +1287,7 @@ const INVENTORY_PEBBLES = [
   { key: "expired_product", label: "Expired Product" },
   { key: "low_stock", label: "Low Stock" },
   { key: "fast_moving", label: "Fast Moving" },
+  { key: "slow_moving", label: "Slow Moving" },
   { key: "overstock", label: "Overstock" },
 ];
 
@@ -1241,7 +1295,14 @@ const INVENTORY_FILTER_PATTERNS = [
   { key: "negative_stock", patterns: ["\\bnegative\\s+stock\\b"] },
   { key: "low_stock", patterns: ["\\blow\\s+stock\\b"] },
   { key: "dead_stock", patterns: ["\\bdead\\s+stock\\b"] },
-  { key: "fast_moving", patterns: ["\\bfast[- ]moving\\b"] },
+  {
+    key: "slow_moving",
+    patterns: ["\\bslow[- ]moving\\b", "\\b(least|lowest)\\s+(sold|selling)\\b", "\\bbottom\\s*5\\b"],
+  },
+  {
+    key: "fast_moving",
+    patterns: ["\\bfast[- ]moving\\b", "\\b(most|highest|best)\\s+(sold|selling)\\b", "\\btop\\s*5\\b"],
+  },
   { key: "overstock", patterns: ["\\bover[- ]?stock\\b"] },
   {
     key: "warehouse_stock",
@@ -1407,6 +1468,7 @@ const MODULES = {
     buildTable: buildOrderTable,
     dedicatedActions: { info: runLedgerInfo },
     comingSoon: new Set(["open_orders", "pending_dispatch"]),
+    companyScoped: true,
   },
   inventory: {
     label: "Inventory",
@@ -1419,7 +1481,7 @@ const MODULES = {
     rowsField: "rows",
     buildTable: buildInventoryTable,
     dedicatedActions: {},
-    comingSoon: new Set(["low_stock", "fast_moving", "overstock"]),
+    companyScoped: true,
   },
 };
 
@@ -1429,10 +1491,13 @@ let currentLedger = null;
 let currentModuleKey = null;
 
 // ---------------------------------------------------------------------------
-// Company (tenant) selector — Customer/Supplier Outstanding are each scoped
-// to exactly one companydata row at a time (its own recPay data only; never
-// blended across companies). The dropdown lives in the chat header and is
-// shown only for `companyScoped` modules.
+// Company (tenant) selector — every module is scoped to exactly one
+// companydata row at a time, never blended across companies. Each module keys
+// off a different column: Customer/Supplier Outstanding and Order Book filter
+// by company id (recPay.company_id and Invoice.Seller_data respectively),
+// while Inventory filters by company *name*, which is what Product stores.
+// The dropdown lives in the chat header and is shown for `companyScoped`
+// modules.
 // ---------------------------------------------------------------------------
 const COMPANY_STORAGE_KEY = "ledger-company-id";
 let companies = [];

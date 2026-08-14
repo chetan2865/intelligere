@@ -12,7 +12,7 @@ from xhtml2pdf import pisa
 from celery_app.models import recPay
 from tallyapp.models import companydata, ladgernamedata
 
-from invoice.models import Invoice
+from invoice.models import Invoice, InvoiceData
 from inventory_management.models import CompanyCredentials, ExpiryProduct, Product
 
 from .models import Ledger
@@ -482,8 +482,14 @@ def order_query_api(request):
             pk=ledger_id, is_deleted=False
         ).values_list('ledeger_name', flat=True).first()
 
+    company_id = request.GET.get('company_id') or None
+
     doc_types = [ORDER_DOC_TYPES[filter_key]] if filter_key in ORDER_DOC_TYPES else list(ORDER_DOC_TYPES.values())
     qs = Invoice.objects.filter(doc_type__in=doc_types)
+    if company_id:
+        # invoice_invoice has no company FK; the owning company's id is stored
+        # as a string in Seller_data.
+        qs = qs.filter(Seller_data=str(company_id))
 
     rows = [_serialize_invoice_order(inv) for inv in qs]
     if ledger_name:
@@ -503,6 +509,7 @@ def order_query_api(request):
         'filter': filter_key,
         'ledger_id': ledger_id,
         'ledger_name': ledger_name,
+        'company_id': company_id,
         'message': message,
         'count': len(rows),
         'total_value': total,
@@ -519,7 +526,41 @@ INVENTORY_FILTER_LABELS = {
     'negative_stock': 'Negative Stock',
     'warehouse_stock': 'Warehouse Wise Stock Items',
     'expired_product': 'Expired Product',
+    'low_stock': 'Low Stock',
+    'fast_moving': 'Fast Moving',
+    'slow_moving': 'Slow Moving',
+    'overstock': 'Overstock',
 }
+
+# How many products the movement rankings return at each end.
+MOVEMENT_RANK_SIZE = 5
+
+# Line-item doc_type that represents an actual sale. Orders/quotations are
+# intent, not movement, so they are not counted; credit notes (returns) are
+# not netted off either.
+SALES_DOC_TYPE = 'Invoice'
+
+
+def _to_number(value):
+    """Quantities arrive as strings ('100.0'), numbers, or blanks depending on
+    which screen wrote the row — returns None when it isn't a usable number."""
+    if value is None or value == '':
+        return None
+    try:
+        return float(str(value).replace(',', '').strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _sku_qty(sku):
+    """Quantity for one SKU entry, preferring its own Quantity key and falling
+    back to the sum of its warehouse allocations."""
+    qty = _to_number(sku.get('Quantity'))
+    if qty is not None:
+        return qty
+    wh_qtys = [_to_number(w.get('qty')) for w in (sku.get('warehouse') or [])]
+    wh_qtys = [q for q in wh_qtys if q is not None]
+    return sum(wh_qtys) if wh_qtys else None
 
 
 def _sku_warehouses(sku):
@@ -570,13 +611,16 @@ def _company_negative_flags():
     return dict(CompanyCredentials.objects.values_list('company__comp_name', 'is_negative'))
 
 
-def _dead_stock_rows():
+def _dead_stock_rows(company_name=None, company_id=None):
     """A product counts as dead stock once its age (from created_at) exceeds
     the deadStock day-count configured on that company's Company credentials."""
     today = timezone.localdate()
     deadstock_days = _company_deadstock_days()
     rows = []
-    for product in Product.objects.filter(deleted=False).exclude(created_at__isnull=True):
+    products = Product.objects.filter(deleted=False).exclude(created_at__isnull=True)
+    if company_name:
+        products = products.filter(company=company_name)
+    for product in products:
         threshold = deadstock_days.get(product.company)
         if threshold is None:
             continue
@@ -597,33 +641,67 @@ def _dead_stock_rows():
     return rows
 
 
-def _negative_stock_rows():
-    """Only companies with is_negative enabled on Company credentials get
-    checked; within those, a SKU's warehouse allocation flags itself via its
-    own is_negative key."""
+def _negative_stock_rows(company_name=None, company_id=None):
+    """Negative stock is opt-in per company: unless is_negative is enabled on
+    that company's Company credentials, the company simply does not track it
+    and reports nothing (the endpoint says so explicitly).
+
+    For companies that do have it enabled, every SKU is checked — a SKU counts
+    as negative when its own quantity is below zero, or when any of its
+    warehouse allocations is negative or carries the is_negative flag."""
     negative_flags = _company_negative_flags()
     rows = []
-    for product in Product.objects.filter(deleted=False):
+    products = Product.objects.filter(deleted=False)
+    if company_name:
+        products = products.filter(company=company_name)
+    for product in products:
         if not negative_flags.get(product.company):
             continue
         for sku in (product.sku or []):
-            for wh in (sku.get('warehouse') or []):
-                if wh.get('is_negative'):
-                    rows.append({
-                        'item_name': product.item_name,
-                        'company': product.company,
-                        'sku_code': sku.get('sku_code', ''),
-                        'warehouse_name': wh.get('name', ''),
-                        'qty': wh.get('qty', ''),
-                        'details': _sku_details(sku),
-                        'warehouses': _sku_warehouses(sku),
-                    })
+            sku_qty = _sku_qty(sku)
+            warehouses = sku.get('warehouse') or []
+
+            negative_whs = [
+                wh for wh in warehouses
+                if wh.get('is_negative') or (_to_number(wh.get('qty')) or 0) < 0
+            ]
+            for wh in negative_whs:
+                rows.append({
+                    'item_name': product.item_name,
+                    'company': product.company,
+                    'sku_code': sku.get('sku_code', ''),
+                    'warehouse_name': wh.get('name', ''),
+                    'qty': wh.get('qty', ''),
+                    'details': _sku_details(sku),
+                    'warehouses': _sku_warehouses(sku),
+                })
+
+            # SKU total is negative but no single warehouse flagged it — still
+            # negative stock, just not attributable to one location.
+            if not negative_whs and sku_qty is not None and sku_qty < 0:
+                rows.append({
+                    'item_name': product.item_name,
+                    'company': product.company,
+                    'sku_code': sku.get('sku_code', ''),
+                    'warehouse_name': '—',
+                    'qty': sku_qty,
+                    'details': _sku_details(sku),
+                    'warehouses': _sku_warehouses(sku),
+                })
     return rows
 
 
-def _warehouse_stock_rows():
+def _company_tracks_negative(company_name):
+    """Whether this company has negative stock enabled on Company credentials."""
+    return bool(_company_negative_flags().get(company_name))
+
+
+def _warehouse_stock_rows(company_name=None, company_id=None):
     rows = []
-    for product in Product.objects.filter(deleted=False):
+    products = Product.objects.filter(deleted=False)
+    if company_name:
+        products = products.filter(company=company_name)
+    for product in products:
         for sku in (product.sku or []):
             for wh in (sku.get('warehouse') or []):
                 rows.append({
@@ -639,11 +717,14 @@ def _warehouse_stock_rows():
     return rows
 
 
-def _expired_product_rows():
+def _expired_product_rows(company_name=None, company_id=None):
     """Same SKU/other_details shape as Product, plus the Amount pulled out of
     other_details onto its own column."""
     rows = []
-    for exp in ExpiryProduct.objects.filter(deleted=False):
+    expired = ExpiryProduct.objects.filter(deleted=False)
+    if company_name:
+        expired = expired.filter(company=company_name)
+    for exp in expired:
         other = exp.other_details if isinstance(exp.other_details, dict) else {}
         amount = other.get('Amount')
         for sku in (exp.sku or [{}]):
@@ -659,11 +740,143 @@ def _expired_product_rows():
     return rows
 
 
+def _movement_rows(company_id=None, slowest=False):
+    """Rank products by how much of them actually sold, off the invoice line
+    items (InvoiceData). Fast Moving is the top slice, Slow Moving the bottom
+    slice, of the same ranking.
+
+    Only products that appear on at least one sales invoice can be ranked here
+    — a product that never sold has no line to count, so it is absent from
+    both ends rather than sitting at the bottom of Slow Moving.
+    """
+    lines = InvoiceData.objects.filter(doc_type=SALES_DOC_TYPE)
+    if company_id:
+        # The line's own Seller_data holds a company *name*; the parent
+        # invoice's holds the id, which is what the selector gives us.
+        lines = lines.filter(Invoice_data__Seller_data=str(company_id))
+
+    totals = {}
+    for name, qty, amount in lines.values_list('Products', 'quantity', 'Amount'):
+        name = (name or '').strip()
+        if not name:
+            continue
+        entry = totals.setdefault(name, {'qty': 0.0, 'amount': 0.0, 'lines': 0})
+        entry['qty'] += _to_number(qty) or 0.0
+        entry['amount'] += _to_number(amount) or 0.0
+        entry['lines'] += 1
+
+    # Each list is ranked in its own direction, so #1 is always the strongest
+    # example of what the list is about: the best seller under Fast Moving,
+    # the worst seller under Slow Moving.
+    if slowest:
+        ranked = sorted(totals.items(), key=lambda kv: (kv[1]['qty'], kv[0]))
+    else:
+        ranked = sorted(totals.items(), key=lambda kv: (-kv[1]['qty'], kv[0]))
+    selected = ranked[:MOVEMENT_RANK_SIZE]
+
+    return [
+        {
+            'rank': 1 + i,
+            'item_name': name,
+            'qty_sold': round(data['qty'], 2),
+            'amount': round(data['amount'], 2),
+            'invoice_lines': data['lines'],
+            'total_ranked': len(ranked),
+        }
+        for i, (name, data) in enumerate(selected)
+    ]
+
+
+def _fast_moving_rows(company_name=None, company_id=None):
+    return _movement_rows(company_id=company_id, slowest=False)
+
+
+def _slow_moving_rows(company_name=None, company_id=None):
+    return _movement_rows(company_id=company_id, slowest=True)
+
+
+def _overstock_rows(company_name=None, company_id=None):
+    """A SKU is overstocked when its quantity exceeds the "Maximum Quantity"
+    configured on the product's other_details. Products with no maximum set
+    cannot be judged and are skipped."""
+    products = Product.objects.filter(deleted=False)
+    if company_name:
+        products = products.filter(company=company_name)
+
+    rows = []
+    for product in products:
+        other = product.other_details if isinstance(product.other_details, dict) else {}
+        max_qty = _to_number(other.get('Maximum Quantity'))
+        if max_qty is None:
+            continue
+        for sku in (product.sku or []):
+            qty = _sku_qty(sku)
+            if qty is None or qty <= max_qty:
+                continue
+            rows.append({
+                'item_name': product.item_name,
+                'company': product.company,
+                'sku_code': sku.get('sku_code', ''),
+                'qty': qty,
+                'max_qty': max_qty,
+                'excess': round(qty - max_qty, 2),
+                'details': _sku_details(sku),
+                'warehouses': _sku_warehouses(sku),
+            })
+    rows.sort(key=lambda r: r['excess'], reverse=True)
+    return rows
+
+
+def _low_stock_rows(company_name=None, company_id=None):
+    """Low stock is judged per warehouse allocation, not per SKU total — a SKU
+    can be healthy overall while one warehouse has run down.
+
+    The threshold is the product's other_details "Minimum Quantity"; products
+    without one fall back to a minimum of 0, so an emptied or negative
+    allocation still surfaces. An allocation counts as low once it *reaches*
+    the threshold (qty <= min), not only when it drops below it.
+    """
+    products = Product.objects.filter(deleted=False)
+    if company_name:
+        products = products.filter(company=company_name)
+
+    rows = []
+    for product in products:
+        other = product.other_details if isinstance(product.other_details, dict) else {}
+        min_qty = _to_number(other.get('Minimum Quantity'))
+        if min_qty is None:
+            min_qty = 0.0
+        for sku in (product.sku or []):
+            for wh in (sku.get('warehouse') or []):
+                qty = _to_number(wh.get('qty'))
+                if qty is None or qty > min_qty:
+                    continue
+                rows.append({
+                    'warehouse_name': wh.get('name') or 'Unassigned',
+                    'item_name': product.item_name,
+                    'company': product.company,
+                    'sku_code': sku.get('sku_code', ''),
+                    'qty': qty,
+                    'min_qty': min_qty,
+                    'shortfall': round(min_qty - qty, 2),
+                    'details': _sku_details(sku),
+                    # Badge/hover show just this allocation, matching how
+                    # Warehouse Wise Stock renders its rows.
+                    'warehouses': _sku_warehouses({'warehouse': [wh]}),
+                })
+    rows.sort(key=lambda r: (r['warehouse_name'], -r['shortfall'], r['item_name'] or ''))
+    return rows
+
+
 INVENTORY_ROW_BUILDERS = {
+    'low_stock': _low_stock_rows,
     'dead_stock': _dead_stock_rows,
     'negative_stock': _negative_stock_rows,
     'warehouse_stock': _warehouse_stock_rows,
     'expired_product': _expired_product_rows,
+    'fast_moving': _fast_moving_rows,
+    'slow_moving': _slow_moving_rows,
+    'overstock': _overstock_rows,
 }
 
 
@@ -672,16 +885,49 @@ def inventory_query_api(request):
     if filter_key not in INVENTORY_FILTER_LABELS:
         filter_key = 'dead_stock'
 
-    rows = INVENTORY_ROW_BUILDERS[filter_key]()
+    # Product/ExpiryProduct store the company by *name*, not id, so the
+    # selected company_id has to be resolved to its comp_name first.
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
     label = INVENTORY_FILTER_LABELS[filter_key]
+    scope = f" for **{company_name}**" if company_name else ''
+
+    # Negative stock is only meaningful for companies that opted into it —
+    # say so plainly rather than returning an empty "no records" table.
+    if filter_key == 'negative_stock' and company_name and not _company_tracks_negative(company_name):
+        return JsonResponse({
+            'filter': filter_key,
+            'company_id': company_id,
+            'company_name': company_name,
+            'message': f"**{company_name}** does not have negative stock enabled in Company credentials.",
+            'count': 0,
+            'rows': [],
+        })
+
+    rows = INVENTORY_ROW_BUILDERS[filter_key](company_name=company_name, company_id=company_id)
 
     if not rows:
-        message = f"No records found for **{label}**."
+        message = f"No records found for **{label}**{scope}."
+    elif filter_key in ('fast_moving', 'slow_moving'):
+        ranked_total = rows[0]['total_ranked']
+        sold_total = sum(r['qty_sold'] for r in rows)
+        descriptor = 'most' if filter_key == 'fast_moving' else 'least'
+        message = (
+            f"Here's **{label}**{scope} — the {descriptor} sold "
+            f"{len(rows)} of {ranked_total} product(s), {sold_total:,.2f} unit(s) between them."
+        )
     else:
-        message = f"Here's **{label}** — {len(rows)} item(s)."
+        message = f"Here's **{label}**{scope} — {len(rows)} item(s)."
 
     return JsonResponse({
         'filter': filter_key,
+        'company_id': company_id,
+        'company_name': company_name,
         'message': message,
         'count': len(rows),
         'rows': rows,
