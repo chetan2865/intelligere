@@ -127,6 +127,9 @@ class ladgernamedata(models.Model):
     platform = models.CharField(max_length=9, blank=True, null=True)
     ledger_gst_reg_type = models.CharField(max_length=25, blank=True, null=True)
     is_deleted = models.BooleanField(default=False)
+    # Backend has this NOT-NULL boolean column; declare it (default False) so
+    # inserts satisfy the constraint. Read-only otherwise.
+    jv = models.BooleanField(default=False)
 
     class Meta:
         verbose_name_plural = "Tally Ledgers (ladgernamedata)"

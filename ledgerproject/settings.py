@@ -109,6 +109,13 @@ DATABASES = {
 
 DATABASE_ROUTERS = ['ledgerproject.dbrouter.RemoteBackendRouter']
 
+# OpenAI — used only to map a typed chat message to one of the on-screen
+# pebbles when the exact-match regex router finds nothing. Set OPENAI_API_KEY in
+# the environment to enable it; if unset, the chat falls back to exact-match +
+# company search and never calls OpenAI.
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4.1-mini')
+
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators

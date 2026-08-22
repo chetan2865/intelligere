@@ -799,19 +799,23 @@ function buildGroupedSkuTable(rows, groupField, groupLabel, columns) {
 }
 
 function computeTableRows(entry) {
-  if (!entry.dateField) return entry.rows;
-
   let rows = entry.rows;
-  if (entry.fromDate) {
-    rows = rows.filter(
-      (r) => r[entry.dateField] && r[entry.dateField] >= entry.fromDate,
-    );
+
+  // Date-range filtering only applies to tables that declared a date column.
+  if (entry.dateField) {
+    if (entry.fromDate) {
+      rows = rows.filter(
+        (r) => r[entry.dateField] && r[entry.dateField] >= entry.fromDate,
+      );
+    }
+    if (entry.toDate) {
+      rows = rows.filter(
+        (r) => r[entry.dateField] && r[entry.dateField] <= entry.toDate,
+      );
+    }
   }
-  if (entry.toDate) {
-    rows = rows.filter(
-      (r) => r[entry.dateField] && r[entry.dateField] <= entry.toDate,
-    );
-  }
+
+  // An explicit column sort wins for any table (date-based or not).
   if (entry.sortColumn) {
     return [...rows].sort((a, b) => {
       const av = a[entry.sortColumn];
@@ -824,6 +828,10 @@ function computeTableRows(entry) {
         : String(bv ?? "").localeCompare(String(av ?? ""));
     });
   }
+
+  // No column sort: date tables fall back to date order, everything else keeps
+  // the server-provided order.
+  if (!entry.dateField) return rows;
   return [...rows].sort((a, b) => {
     const av = a[entry.dateField] || "";
     const bv = b[entry.dateField] || "";
@@ -1033,6 +1041,88 @@ function buildOrderTable(orders, filterKey) {
     theadHtml,
     "order_date",
   );
+}
+
+// Bank Statement: per-party bank movement vs. remaining outstanding. The two
+// pebbles differ only in labels — Payment reads pay_data + Payment bank lines,
+// Receipt reads rec_data + Receipt bank lines (the server does that split).
+const BANK_COLUMN_LABELS = {
+  payment: { bank: "Bank Payment", total: "Pay Data Total" },
+  receipt: { bank: "Bank Receipts", total: "Rec Data Total" },
+};
+
+function renderBankRows(rows) {
+  return rows
+    .map(
+      (r) => `<tr>
+        <td>${escapeHtml(r.party || "—")}</td>
+        <td>${fmtMoney(r.bank_amount)}</td>
+        <td>${fmtMoney(r.data_total)}</td>
+        <td>${fmtMoney(r.remaining)}</td>
+      </tr>`,
+    )
+    .join("");
+}
+
+function buildBankTable(rows, filterKey) {
+  const labels = BANK_COLUMN_LABELS[filterKey] || BANK_COLUMN_LABELS.payment;
+  const theadHtml = `<tr>
+    <th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th>
+    <th data-sort-col="bank_amount" style="cursor:pointer;user-select:none;">${labels.bank} <span class="sort-icon">↕</span></th>
+    <th data-sort-col="data_total" style="cursor:pointer;user-select:none;">${labels.total} <span class="sort-icon">↕</span></th>
+    <th data-sort-col="remaining" style="cursor:pointer;user-select:none;">Remaining <span class="sort-icon">↕</span></th>
+  </tr>`;
+  return buildPaginatedTable(rows, renderBankRows, theadHtml);
+}
+
+// Invoices GST summary: a totals card (Total Sales/Purchase + Total CGST/SGST/
+// IGST, matching the spec layout) followed by a party-wise breakdown. Only
+// GST-bearing line items are counted — the server does that filtering, so the
+// totals here are just the sum of the party rows.
+function renderInvoiceTaxRows(rows) {
+  return rows
+    .map(
+      (r) => `<tr>
+        <td>${escapeHtml(r.party || "—")}</td>
+        <td>${fmtMoney(r.amount)}</td>
+        <td>${fmtMoney(r.cgst)}</td>
+        <td>${fmtMoney(r.sgst)}</td>
+        <td>${fmtMoney(r.igst)}</td>
+      </tr>`,
+    )
+    .join("");
+}
+
+function buildInvoiceTaxTable(rows, filterKey) {
+  const label = filterKey === "total_purchase" ? "Purchase" : "Sales";
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.amount += r.amount || 0;
+      acc.cgst += r.cgst || 0;
+      acc.sgst += r.sgst || 0;
+      acc.igst += r.igst || 0;
+      return acc;
+    },
+    { amount: 0, cgst: 0, sgst: 0, igst: 0 },
+  );
+
+  const totalsCard = `
+    <div class="record-card"><table><tbody>
+      <tr><th>Total ${label}</th><td>${fmtMoney(totals.amount)}</td></tr>
+      <tr><th>Total CGST</th><td>${fmtMoney(totals.cgst)}</td></tr>
+      <tr><th>Total SGST</th><td>${fmtMoney(totals.sgst)}</td></tr>
+      <tr><th>Total IGST</th><td>${fmtMoney(totals.igst)}</td></tr>
+    </tbody></table></div>`;
+
+  const theadHtml = `<tr>
+    <th data-sort-col="party" style="cursor:pointer;user-select:none;">Party <span class="sort-icon">↕</span></th>
+    <th data-sort-col="amount" style="cursor:pointer;user-select:none;">Amount <span class="sort-icon">↕</span></th>
+    <th data-sort-col="cgst" style="cursor:pointer;user-select:none;">CGST <span class="sort-icon">↕</span></th>
+    <th data-sort-col="sgst" style="cursor:pointer;user-select:none;">SGST <span class="sort-icon">↕</span></th>
+    <th data-sort-col="igst" style="cursor:pointer;user-select:none;">IGST <span class="sort-icon">↕</span></th>
+  </tr>`;
+  const partyTable = buildPaginatedTable(rows, renderInvoiceTaxRows, theadHtml);
+  return totalsCard + partyTable;
 }
 
 const fmtAmount = (v) => (v !== null && v !== undefined ? fmtMoney(v) : "—");
@@ -1280,6 +1370,26 @@ const ORDER_FILTER_PATTERNS = [
   { key: "all", patterns: ["\\ball\\s+orders?\\b", "\\border\\s+book\\b"] },
 ];
 
+const BANK_STATEMENT_PEBBLES = [
+  { key: "payment", label: "Payment" },
+  { key: "receipt", label: "Receipt" },
+];
+
+const INVOICE_TAX_PEBBLES = [
+  { key: "total_sales", label: "Total Sales" },
+  { key: "total_purchase", label: "Total Purchase" },
+];
+
+const INVOICE_TAX_FILTER_PATTERNS = [
+  { key: "total_purchase", patterns: ["\\bpurchases?\\b"] },
+  { key: "total_sales", patterns: ["\\bsales?\\b"] },
+];
+
+const BANK_FILTER_PATTERNS = [
+  { key: "receipt", patterns: ["\\brec(?:e)?ipts?\\b", "\\breceived\\b"] },
+  { key: "payment", patterns: ["\\bpayments?\\b", "\\bpaid\\b"] },
+];
+
 const INVENTORY_PEBBLES = [
   { key: "dead_stock", label: "Dead Stock" },
   { key: "negative_stock", label: "Negative Stock" },
@@ -1480,6 +1590,32 @@ const MODULES = {
     idParam: null,
     rowsField: "rows",
     buildTable: buildInventoryTable,
+    dedicatedActions: {},
+    companyScoped: true,
+  },
+  bank_statement: {
+    label: "Bank Statement",
+    shortLabel: "Bank",
+    staticPebbles: BANK_STATEMENT_PEBBLES,
+    dynamicPebbles: BANK_STATEMENT_PEBBLES,
+    filterPatterns: BANK_FILTER_PATTERNS,
+    queryUrl: BANK_QUERY_URL,
+    idParam: null,
+    rowsField: "rows",
+    buildTable: buildBankTable,
+    dedicatedActions: {},
+    companyScoped: true,
+  },
+  invoices: {
+    label: "Invoices",
+    shortLabel: "Invoices",
+    staticPebbles: INVOICE_TAX_PEBBLES,
+    dynamicPebbles: INVOICE_TAX_PEBBLES,
+    filterPatterns: INVOICE_TAX_FILTER_PATTERNS,
+    queryUrl: INVOICE_TAX_QUERY_URL,
+    idParam: null,
+    rowsField: "rows",
+    buildTable: buildInvoiceTaxTable,
     dedicatedActions: {},
     companyScoped: true,
   },
@@ -2016,6 +2152,54 @@ document.querySelectorAll(".module").forEach((btn) => {
   });
 });
 
+// Remembers whether the OpenAI router is configured on the backend, so once we
+// learn it isn't we stop making round-trips and fall straight back to regex +
+// company search. null = unknown, true/false once the first call answers.
+let AI_ROUTER_CONFIGURED = null;
+
+function backToAllCompanies() {
+  exitCompanyContext();
+  appendBotMessage(
+    "You're back to browsing all companies. What would you like to see?",
+  );
+  showCurrentPebbles();
+}
+
+// Ask the backend (OpenAI) to map a free-text message to one of the pebbles
+// currently on screen. Returns the chosen pebble key, or null. Only used as a
+// fallback when the exact-match regex router found nothing.
+async function interpretWithAI(text) {
+  if (AI_ROUTER_CONFIGURED === false) return null;
+
+  const pebbles = currentPebbleSet()
+    .filter((p) => p.key && p.key !== "reset")
+    .map((p) => ({ key: p.key, label: p.label }));
+  if (!pebbles.length) return null;
+
+  const typingEl = showTyping();
+  try {
+    const res = await fetch(INTERPRET_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCsrfToken(),
+      },
+      body: JSON.stringify({
+        text,
+        pebbles,
+        module: MODULES[currentModuleKey].label,
+      }),
+    });
+    const data = await res.json();
+    AI_ROUTER_CONFIGURED = data.configured !== false;
+    typingEl.remove();
+    return data.pebble || null;
+  } catch (err) {
+    typingEl.remove();
+    return null;
+  }
+}
+
 async function handleSend() {
   const text = chatInput.value.trim();
   if (!text) return;
@@ -2030,34 +2214,27 @@ async function handleSend() {
     return;
   }
 
-  const { filterKey, companyQuery } = extractIntent(
-    text,
-    module.filterPatterns,
-  );
-
-  if (companyQuery) {
-    const resolvedFilterKey = filterKey === "reset" ? null : filterKey;
-    await searchCompanies(companyQuery, resolvedFilterKey);
+  // Chat input is VERBAL-ONLY: OpenAI matches the typed message against the
+  // pebbles currently on screen and fires the matching one. There is no regex
+  // word-constraint here, and company search from chat is intentionally
+  // DISABLED for now — searchCompanies() is kept and still runs on party
+  // clicks (see the .party-link handler); chat-driven company lookups will be
+  // wired through OpenAI in a later step. Pebble clicks and party clicks never
+  // reach this function, so they always trigger their response directly.
+  const aiKey = await interpretWithAI(text);
+  if (aiKey === "reset") {
+    backToAllCompanies();
     return;
   }
-
-  if (filterKey === "reset") {
-    exitCompanyContext();
-    appendBotMessage(
-      "You're back to browsing all companies. What would you like to see?",
-    );
-    showCurrentPebbles();
-    return;
-  }
-
-  if (filterKey) {
-    await dispatchFilterActionAsync(filterKey);
+  if (aiKey) {
+    await dispatchFilterActionAsync(aiKey);
     return;
   }
 
   appendBotMessage(
-    'I didn\'t catch that — try a company name, or a filter like "overdue" or "low stock".',
+    "I couldn't match that to an option on this screen. Tap one of the suggestions below, or rephrase what you'd like to see.",
   );
+  showCurrentPebbles();
 }
 
 async function dispatchFilterActionAsync(filterKey) {

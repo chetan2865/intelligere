@@ -109,6 +109,25 @@
                 <line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span
             ><span>Order Book</span>
           </button>
+          <button class="module" data-module="invoices">
+            <span class="m-icon"
+              ><svg
+                stroke="currentColor"
+                fill="none"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                height="1em"
+                width="1em"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="12" y1="18" x2="12" y2="12"></line>
+                <line x1="9" y1="15" x2="15" y2="15"></line></svg></span
+            ><span>Invoices</span>
+          </button>
           <button class="module" data-module="inventory">
             <span class="m-icon"
               ><svg
@@ -126,6 +145,27 @@
                 <line x1="12" y1="20" x2="12" y2="4"></line>
                 <line x1="6" y1="20" x2="6" y2="14"></line></svg></span
             ><span>Inventory</span>
+          </button>
+          <button class="module" data-module="bank_statement">
+            <span class="m-icon"
+              ><svg
+                stroke="currentColor"
+                fill="none"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                height="1em"
+                width="1em"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <line x1="3" y1="22" x2="21" y2="22"></line>
+                <line x1="6" y1="18" x2="6" y2="11"></line>
+                <line x1="10" y1="18" x2="10" y2="11"></line>
+                <line x1="14" y1="18" x2="14" y2="11"></line>
+                <line x1="18" y1="18" x2="18" y2="11"></line>
+                <polygon points="12 2 20 7 4 7"></polygon></svg></span
+            ><span>Bank Statement</span>
           </button>
           <div class="sidebar-most-used" id="sidebarMostUsed"></div>
         </nav>
@@ -247,8 +287,11 @@
       const AGING_URL = "{% url 'ledger:ledger_aging_api' %}";
       const TRANSACTIONS_URL = "{% url 'ledger:ledger_transactions_api' %}";
       const ORDER_QUERY_URL = "{% url 'ledger:order_query_api' %}";
+      const BANK_QUERY_URL = "{% url 'ledger:bank_query_api' %}";
+      const INVOICE_TAX_QUERY_URL = "{% url 'ledger:invoice_tax_query_api' %}";
       const INVENTORY_QUERY_URL = "{% url 'ledger:inventory_query_api' %}";
       const EXPORT_PDF_URL = "{% url 'ledger:export_pdf_api' %}";
+      const INTERPRET_URL = "{% url 'ledger:interpret_api' %}";
       const LOGO_URL = "{% static 'ledger/logo.png' %}";
     </script>
     <script src="{% static 'ledger/js/main.js' %}?v={% now 'U' %}"></script>

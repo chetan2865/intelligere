@@ -1,7 +1,11 @@
 import io
 import json
+import urllib.error
+import urllib.request
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 
+from django.conf import settings
 from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
@@ -184,6 +188,139 @@ def _recpay_paid_rows(party=None, company_id=None):
     for r in rows:
         r.pop('_due_date_obj', None)
     return rows, today
+
+
+# ---------------------------------------------------------------------------
+# Bank Statement. Two pebbles, both off celery_app.recPay:
+#
+#   Payment  -> party | bank payment | remaining
+#   Receipt  -> party | bank receipts | remaining
+#
+# "Bank payment/receipt" per party is the total of that party's bank_entry_data
+# lines whose vouchertype is Payment (uses the debit column) or Receipt (uses
+# the credit column). "Remaining" is that party's outstanding total from
+# pay_data (Payment) or rec_data (Receipt) minus what the bank has already
+# moved. bank_entry_data is shaped {party_ledger_name: [ {ledger_name,
+# particular, vouchertype, debit, credit, ...} ]}. The PARTY is that top-level
+# key (== each line's `ledger_name`); `particular` is the contra bank/cash
+# account and must NOT be used for grouping. vouchertype arrives in mixed case
+# ("Payment"/"payment") so it is lowercased.
+# ---------------------------------------------------------------------------
+
+BANK_FILTER_LABELS = {'payment': 'Payment', 'receipt': 'Receipt'}
+
+
+def _bank_entry_lines(bank_entry_data):
+    """Yield (party, entry) for every bank transaction.
+
+    The party is the top-level key the entry is grouped under (its own ledger),
+    falling back to the line's `ledger_name` — never `particular`, which is the
+    contra bank/cash account.
+    """
+    if isinstance(bank_entry_data, dict):
+        for key, value in bank_entry_data.items():
+            if isinstance(value, list):
+                for entry in value:
+                    if isinstance(entry, dict):
+                        yield (key or entry.get('ledger_name') or ''), entry
+    elif isinstance(bank_entry_data, list):
+        for entry in bank_entry_data:
+            if isinstance(entry, dict):
+                yield (entry.get('ledger_name') or ''), entry
+
+
+def _recpay_bank_rows(mode, company_id=None):
+    """Per-party bank movement + remaining outstanding for the bank statement.
+
+    mode 'payment' works off pay_data and Payment-vouchertype bank lines (debit);
+    mode 'receipt' works off rec_data and Receipt-vouchertype bank lines (credit).
+    """
+    recpay = _company_recpay(company_id)
+    if not recpay:
+        return []
+
+    if mode == 'receipt':
+        data, want_vtype, amount_field = recpay.rec_data, 'receipt', 'credit'
+    else:
+        data, want_vtype, amount_field = recpay.pay_data, 'payment', 'debit'
+
+    # Total of this party's bank lines for the wanted vouchertype.
+    bank_totals = defaultdict(float)
+    for party, entry in _bank_entry_lines(recpay.bank_entry_data):
+        if str(entry.get('vouchertype') or '').strip().lower() != want_vtype:
+            continue
+        party = (party or '').strip()
+        if not party:
+            continue
+        # Payment amount sits in debit, receipt amount in credit; fall back to
+        # the other column when the expected one is blank.
+        amount = _to_number(entry.get(amount_field))
+        if amount is None:
+            amount = _to_number(entry.get('credit' if amount_field == 'debit' else 'debit'))
+        bank_totals[party] += amount or 0.0
+
+    # Total outstanding per party from rec_data / pay_data.
+    data_totals = defaultdict(float)
+    for party, invoices in (data or {}).items():
+        key = (party or '').strip()
+        if not key:
+            continue
+        data_totals[key] += sum(float(inv.get('amount') or 0) for inv in invoices)
+
+    # Only parties present in BOTH the outstanding data (pay_data/rec_data) and
+    # the bank entries are shown — this drops pure bank/cash contra accounts
+    # (AXIS BANK, HDFC BANK, Cash, ...) that never appear as a trade party.
+    rows = []
+    for party in sorted(set(bank_totals) & set(data_totals), key=str.lower):
+        bank_amount = round(bank_totals.get(party, 0.0), 2)
+        data_total = round(data_totals.get(party, 0.0), 2)
+        rows.append({
+            'party': party,
+            'bank_amount': bank_amount,
+            'data_total': data_total,
+            'remaining': round(data_total - bank_amount, 2),
+        })
+    return rows
+
+
+def bank_query_api(request):
+    mode = request.GET.get('type', 'payment')
+    if mode not in BANK_FILTER_LABELS:
+        mode = 'payment'
+
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    rows = _recpay_bank_rows(mode, company_id=company_id)
+
+    label = BANK_FILTER_LABELS[mode]
+    scope = f" for **{company_name}**" if company_name else ''
+    bank_total = sum(r['bank_amount'] for r in rows)
+    remaining_total = sum(r['remaining'] for r in rows)
+    bank_word = 'bank payment' if mode == 'payment' else 'bank receipts'
+    if not rows:
+        message = f"No **Bank Statement — {label}** records found{scope}."
+    else:
+        message = (
+            f"Here's the **Bank Statement — {label}**{scope} — {len(rows)} party(ies), "
+            f"₹{bank_total:,.2f} in {bank_word}, ₹{remaining_total:,.2f} remaining."
+        )
+
+    return JsonResponse({
+        'filter': mode,
+        'mode': mode,
+        'company_id': company_id,
+        'company_name': company_name,
+        'message': message,
+        'count': len(rows),
+        'bank_total': bank_total,
+        'remaining_total': remaining_total,
+        'rows': rows,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +651,113 @@ def order_query_api(request):
         'count': len(rows),
         'total_value': total,
         'orders': rows,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Invoices — GST summary (Total Sales / Total Purchase), party wise.
+#
+# Off invoice.InvoiceData line items: Total Sales = doc_type 'Invoice',
+# Total Purchase = doc_type 'Purchase Invoice'. IMPORTANT: only line items that
+# actually carry GST are counted — a line with no CGST/SGST/IGST amount is
+# skipped from both the amount total and the tax totals. `Amount` is the line's
+# taxable value; the tax figures come from the product_*_amount columns (the
+# CGST/SGST/IGST columns themselves hold rate percentages, not amounts).
+#
+# On every line, `Seller_data` is the owning company itself and `Buyer_data` is
+# the counterparty — the sales/purchase direction is carried by doc_type, not by
+# swapping seller/buyer. So the trade PARTY is always `Buyer_data` (the customer
+# for sales, the vendor for purchase); using Seller_data would just repeat the
+# company name. Company scope uses the parent invoice's Seller_data, which stores
+# the owning company id.
+# ---------------------------------------------------------------------------
+
+INVOICE_TAX_LABELS = {'total_sales': 'Sales', 'total_purchase': 'Purchase'}
+INVOICE_TAX_DOC_TYPES = {'total_sales': 'Invoice', 'total_purchase': 'Purchase Invoice'}
+
+
+def _invoice_tax_rows(mode, company_id=None):
+    doc_type = INVOICE_TAX_DOC_TYPES[mode]
+    # The counterparty is always in Buyer_data for both sales and purchase.
+    party_field = 'Buyer_data'
+
+    lines = InvoiceData.objects.filter(doc_type=doc_type)
+    if company_id:
+        lines = lines.filter(Invoice_data__Seller_data=str(company_id))
+
+    def zero_or_null(field):
+        return Q(**{field: 0}) | Q(**{field + '__isnull': True})
+
+    # Keep only lines that actually carry GST (any of the three amounts set).
+    lines = lines.exclude(
+        zero_or_null('product_cgst_amount')
+        & zero_or_null('product_sgst_amount')
+        & zero_or_null('product_igst_amount')
+    )
+
+    totals = defaultdict(lambda: {'amount': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'igst': 0.0})
+    for party, amount, cgst, sgst, igst in lines.values_list(
+        party_field, 'Amount',
+        'product_cgst_amount', 'product_sgst_amount', 'product_igst_amount',
+    ):
+        key = (party or '').strip() or '—'
+        entry = totals[key]
+        entry['amount'] += _to_number(amount) or 0.0
+        entry['cgst'] += _to_number(cgst) or 0.0
+        entry['sgst'] += _to_number(sgst) or 0.0
+        entry['igst'] += _to_number(igst) or 0.0
+
+    rows = [{
+        'party': party,
+        'amount': round(t['amount'], 2),
+        'cgst': round(t['cgst'], 2),
+        'sgst': round(t['sgst'], 2),
+        'igst': round(t['igst'], 2),
+        'total_tax': round(t['cgst'] + t['sgst'] + t['igst'], 2),
+    } for party, t in totals.items()]
+    rows.sort(key=lambda r: r['amount'], reverse=True)
+    return rows
+
+
+def invoice_tax_query_api(request):
+    mode = request.GET.get('type', 'total_sales')
+    if mode not in INVOICE_TAX_LABELS:
+        mode = 'total_sales'
+
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    rows = _invoice_tax_rows(mode, company_id=company_id)
+    label = INVOICE_TAX_LABELS[mode]
+    scope = f" for **{company_name}**" if company_name else ''
+    totals = {
+        'amount': sum(r['amount'] for r in rows),
+        'cgst': sum(r['cgst'] for r in rows),
+        'sgst': sum(r['sgst'] for r in rows),
+        'igst': sum(r['igst'] for r in rows),
+    }
+    if not rows:
+        message = f"No GST-bearing **Total {label}** records found{scope}."
+    else:
+        message = (
+            f"Here's **Total {label}**{scope} (GST records only) — {len(rows)} party(ies), "
+            f"₹{totals['amount']:,.2f} taxable · CGST ₹{totals['cgst']:,.2f} · "
+            f"SGST ₹{totals['sgst']:,.2f} · IGST ₹{totals['igst']:,.2f}."
+        )
+
+    return JsonResponse({
+        'filter': mode,
+        'mode': mode,
+        'company_id': company_id,
+        'company_name': company_name,
+        'message': message,
+        'count': len(rows),
+        'totals': totals,
+        'rows': rows,
     })
 
 
@@ -932,6 +1176,77 @@ def inventory_query_api(request):
         'count': len(rows),
         'rows': rows,
     })
+
+
+OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
+
+
+@require_POST
+def interpret_api(request):
+    """Map a free-text chat message to one of the pebbles currently on screen.
+
+    Called by the frontend ONLY when its exact-match regex router finds nothing,
+    so clean input and pebble clicks never reach OpenAI. The browser sends the
+    typed text plus the list of available pebbles ({key, label}); OpenAI picks
+    the single best key (or none). The API key lives server-side; if it is not
+    configured the endpoint returns configured=False and the chat falls back to
+    its regex + company-search behaviour.
+    """
+    try:
+        payload = json.loads(request.body)
+    except (ValueError, TypeError):
+        return JsonResponse({'pebble': None, 'error': 'Invalid JSON body'}, status=400)
+
+    text = (payload.get('text') or '').strip()
+    pebbles = [p for p in (payload.get('pebbles') or []) if p.get('key')]
+    module_label = payload.get('module') or ''
+    allowed = {p['key'] for p in pebbles}
+
+    api_key = getattr(settings, 'OPENAI_API_KEY', '')
+    if not api_key:
+        return JsonResponse({'pebble': None, 'configured': False})
+    if not text or not allowed:
+        return JsonResponse({'pebble': None, 'configured': True})
+
+    options = "\n".join(f"- {p['key']}: {p['label']}" for p in pebbles)
+    system = (
+        "You route a user's message to the single option whose meaning best "
+        "matches their intent, choosing only from the options provided. "
+        "Understand meaning, not exact words — handle synonyms, paraphrases, "
+        "metaphors, typos and informal or broken English, and pick the closest "
+        "option even when the wording is loose. Return an empty string only "
+        "when the message carries no intent that fits any option (a greeting, "
+        "chit-chat, gibberish, or just a company/person name). Use only the "
+        'given keys. Reply ONLY as JSON: {"pebble": "<key>"}.'
+    )
+    user = (
+        f"Screen: {module_label}\n"
+        f"Options (key: label):\n{options}\n\n"
+        f"User message: {text}"
+    )
+    body = json.dumps({
+        'model': getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini'),
+        'messages': [
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': user},
+        ],
+        'temperature': 0,
+        'response_format': {'type': 'json_object'},
+    }).encode('utf-8')
+
+    req = urllib.request.Request(
+        OPENAI_URL, data=body,
+        headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        content = data['choices'][0]['message']['content']
+        choice = (json.loads(content).get('pebble') or '').strip()
+    except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as exc:
+        return JsonResponse({'pebble': None, 'configured': True, 'error': str(exc)[:200]})
+
+    return JsonResponse({'pebble': choice if choice in allowed else None, 'configured': True})
 
 
 @require_POST
