@@ -78,6 +78,9 @@ WSGI_APPLICATION = 'ledgerproject.wsgi.application'
 
 CSRF_TRUSTED_ORIGINS = [
     "https://intelligere-production.up.railway.app",
+    # Trust any Railway subdomain so POST endpoints (chat /api/interpret/,
+    # PDF export) pass CSRF regardless of the exact deployed URL.
+    "https://*.up.railway.app",
 ]
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
