@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -1175,6 +1175,321 @@ def inventory_query_api(request):
         'message': message,
         'count': len(rows),
         'rows': rows,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Reports — data-driven cards. Report 4 (Customer Collection Priority) is
+# computed live from celery_app.recPay: customer outstanding comes from rec_data
+# (netted of received / partial_received, same as Customer Outstanding), ranked
+# by amount, with the worst overdue age per customer.
+# ---------------------------------------------------------------------------
+
+def _inr(amount):
+    """Format a number as Indian-grouped rupees, e.g. 1500370 -> ₹15,00,370."""
+    n = int(round(amount or 0))
+    sign = '-' if n < 0 else ''
+    s = str(abs(n))
+    if len(s) > 3:
+        last3, rest = s[-3:], s[:-3]
+        groups = []
+        while len(rest) > 2:
+            groups.insert(0, rest[-2:])
+            rest = rest[:-2]
+        if rest:
+            groups.insert(0, rest)
+        s = ','.join(groups) + ',' + last3
+    return f'₹{sign}{s}'
+
+
+def report_customer_collection_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    recpay = _company_recpay(company_id)
+    if not recpay:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    today = timezone.localdate()
+    agg = {}      # party -> {'outstanding': float, 'days': int}
+    details = {}  # party -> list of open invoices (what the outstanding is about)
+    for party, inv, amount in _recpay_open_invoices(
+        recpay.rec_data, recpay.received, recpay.partial_received
+    ):
+        due = _parse_recpay_date(inv.get('duedate'))
+        days_late = (today - due).days if due and due < today else 0
+        entry = agg.setdefault(party, {'outstanding': 0.0, 'days': 0})
+        entry['outstanding'] += amount
+        entry['days'] = max(entry['days'], days_late)
+        details.setdefault(party, []).append({
+            'invoice_no': inv.get('invoice_no') or '—',
+            'amount': amount,
+            'due': due.isoformat() if due else '',
+            'days': days_late,
+        })
+
+    ranked = sorted(agg.items(), key=lambda kv: kv[1]['outstanding'], reverse=True)
+    if not ranked:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    def action_for(rank):
+        if rank == 0:
+            return '🔴 Contact Now'
+        if rank <= 2:
+            return '🟠 Follow Up'
+        return '🟡 Monitor'
+
+    # Phone/email per party for the "Contact Customer" hover, from ladgernamedata.
+    contacts = {}
+    if recpay.company_id:
+        for name, phone, email in ladgernamedata.objects.filter(
+            company_id=recpay.company_id, is_deleted=False
+        ).values_list('ledeger_name', 'ledeger_phone', 'ledeger_email'):
+            if name:
+                contacts[name.strip()] = {'phone': phone or '', 'email': email or ''}
+
+    cards = []
+    for i, (party, e) in enumerate(ranked[:5]):
+        amt = _inr(e['outstanding'])
+        info = contacts.get(party.strip(), {})
+        invoices = sorted(details.get(party, []), key=lambda x: x['amount'], reverse=True)[:5]
+        outstanding = [{
+            'invoice_no': x['invoice_no'],
+            'amount': _inr(x['amount']),
+            'due': x['due'],
+            'days': x['days'],
+        } for x in invoices]
+        cards.append({
+            'name': party,
+            'title': f"Collect {amt} — {party}",
+            'why': f"{amt} has been overdue for {e['days']} days.",
+            'impact': 'Your cash is blocked.',
+            'phone': info.get('phone', ''),
+            'email': info.get('email', ''),
+            'invoice_count': len(details.get(party, [])),
+            'outstanding': outstanding,
+            'hero': {'name': party, 'amount': amt, 'amountLabel': 'Outstanding',
+                     'days': str(e['days']), 'daysLabel': 'Days Overdue'},
+            'row': [party, amt, f"{e['days']} days", action_for(i)],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Contact Customer', 'View Outstanding'],
+        'similar_title': 'Similar Results',
+        'similar_headers': ['Customer', 'Overdue', 'Days Late', 'Action'],
+        'cards': cards,
+    })
+
+
+def report_supplier_payment_api(request):
+    """Report 5 — Supplier Payment Priority. Computed live from recPay.pay_data
+    (payables, netted of paid / partial_paid), ranked by amount, worst overdue
+    age per supplier. Similar Results intentionally omits supplier-importance and
+    action columns for now."""
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    recpay = _company_recpay(company_id)
+    if not recpay:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    today = timezone.localdate()
+    agg = {}      # party -> {'outstanding': float, 'days': int}
+    details = {}  # party -> list of open payable invoices
+    for party, inv, amount in _recpay_open_invoices(
+        recpay.pay_data, recpay.paid, recpay.partial_paid
+    ):
+        due = _parse_recpay_date(inv.get('duedate'))
+        days_late = (today - due).days if due and due < today else 0
+        entry = agg.setdefault(party, {'outstanding': 0.0, 'days': 0})
+        entry['outstanding'] += amount
+        entry['days'] = max(entry['days'], days_late)
+        details.setdefault(party, []).append({
+            'invoice_no': inv.get('invoice_no') or '—',
+            'amount': amount,
+            'due': due.isoformat() if due else '',
+            'days': days_late,
+        })
+
+    ranked = sorted(agg.items(), key=lambda kv: kv[1]['outstanding'], reverse=True)
+    if not ranked:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    cards = []
+    for party, e in ranked[:5]:
+        amt = _inr(e['outstanding'])
+        invoices = sorted(details.get(party, []), key=lambda x: x['amount'], reverse=True)[:5]
+        outstanding = [{
+            'invoice_no': x['invoice_no'],
+            'amount': _inr(x['amount']),
+            'due': x['due'],
+            'days': x['days'],
+        } for x in invoices]
+        cards.append({
+            'name': party,
+            'title': f"Pay {amt} — {party}",
+            'why': f"{party} is one of your key suppliers.",
+            'impact': 'Delayed payment may affect future supply.',
+            'invoice_count': len(details.get(party, [])),
+            'outstanding': outstanding,
+            'hero': {'name': party, 'amount': amt, 'amountLabel': 'Payment Due',
+                     'days': str(e['days']), 'daysLabel': 'Days Overdue'},
+            'row': [party, amt, f"{e['days']} days"],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Pay Now'],
+        'similar_title': 'Similar Results',
+        'similar_headers': ['Supplier', 'Overdue', 'Days Late'],
+        'cards': cards,
+    })
+
+
+SLOW_MOVING_MIN_STOCK = 15  # buffer added on top of units-sold for suggested buy
+
+
+def report_slow_moving_api(request):
+    """Report 6 — Reduce Purchase for Slow-Moving Item. Live from InvoiceData:
+    sales = doc_type 'Invoice', purchase = doc_type 'Purchase Invoice', grouped
+    by product. Slow movers = products purchased more than sold (excess > 0),
+    ranked by excess. Suggested buy = units sold .. units sold + min-stock(15)."""
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    def totals(doc_type):
+        qs = InvoiceData.objects.filter(doc_type=doc_type)
+        if company_id:
+            qs = qs.filter(Invoice_data__Seller_data=str(company_id))
+        out = {}
+        for row in qs.values('Products').annotate(q=Sum('quantity'), a=Sum('Amount')):
+            name = (row['Products'] or '').strip()
+            if name:
+                out[name] = {'qty': row['q'] or 0.0, 'amount': row['a'] or 0.0}
+        return out
+
+    sales = totals('Invoice')
+    purchase = totals('Purchase Invoice')
+
+    # Representative SKU + warehouse per product, from the purchase lines.
+    meta = {}
+    meta_qs = InvoiceData.objects.filter(doc_type='Purchase Invoice')
+    if company_id:
+        meta_qs = meta_qs.filter(Invoice_data__Seller_data=str(company_id))
+    for name, sku, wh in meta_qs.values_list('Products', 'sku_code', 'warehouse'):
+        key = (name or '').strip()
+        if not key:
+            continue
+        m = meta.setdefault(key, {'sku': '', 'warehouse': ''})
+        if not m['sku'] and sku:
+            m['sku'] = sku
+        if not m['warehouse'] and wh:
+            names = []
+            if isinstance(wh, list):
+                for w in wh:
+                    if isinstance(w, dict) and w.get('name'):
+                        names.append(w['name'])
+                    elif isinstance(w, str):
+                        names.append(w)
+            if names:
+                m['warehouse'] = ', '.join(names)
+
+    # Primary SKU + warehouse source: inventory Product (matched by item name),
+    # which is where SKUs and warehouse allocations actually live.
+    inv_meta = {}
+    if company_name:
+        for item_name, sku_json in Product.objects.filter(
+            company=company_name, deleted=False
+        ).values_list('item_name', 'sku'):
+            key = (item_name or '').strip()
+            if not key:
+                continue
+            skus, whs = [], []
+            if isinstance(sku_json, list):
+                for s in sku_json:
+                    if not isinstance(s, dict):
+                        continue
+                    if s.get('sku_code'):
+                        skus.append(s['sku_code'])
+                    for w in (s.get('warehouse') or []):
+                        if isinstance(w, dict) and w.get('name'):
+                            whs.append(w['name'])
+            entry = inv_meta.setdefault(key, {'sku': '', 'warehouse': ''})
+            if not entry['sku'] and skus:
+                entry['sku'] = ', '.join(list(dict.fromkeys(skus))[:3])
+            if not entry['warehouse'] and whs:
+                entry['warehouse'] = ', '.join(list(dict.fromkeys(whs)))
+
+    def sku_of(name):
+        return inv_meta.get(name, {}).get('sku') or meta.get(name, {}).get('sku') or '—'
+
+    def wh_of(name):
+        return inv_meta.get(name, {}).get('warehouse') or meta.get(name, {}).get('warehouse') or '—'
+
+    def fmt_qty(v):
+        return f'{v:g}'
+
+    items = []
+    for name in set(sales) | set(purchase):
+        s = sales.get(name, {}).get('qty', 0.0)
+        p = purchase.get(name, {}).get('qty', 0.0)
+        excess = p - s
+        if excess <= 0:
+            continue  # only products bought more than sold
+        p_amt = purchase.get(name, {}).get('amount', 0.0)
+        avg_unit = (p_amt / p) if p else 0.0
+        blocked = excess * avg_unit
+        lower = int(round(s))
+        upper = lower + SLOW_MOVING_MIN_STOCK
+        rec = f'Buy {lower}-{upper}' if s > 0 else 'Avoid restocking'
+        items.append({'name': name, 'sales': s, 'purchase': p, 'excess': excess,
+                      'blocked': blocked, 'amount': p_amt, 'rec': rec})
+
+    items.sort(key=lambda x: x['excess'], reverse=True)
+    if not items:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    cards = []
+    for m in items[:5]:
+        impact = (f"Excess stock is blocking about {_inr(m['blocked'])}."
+                  if m['blocked'] else
+                  f"Excess stock of {fmt_qty(m['excess'])} units is blocking working capital.")
+        cards.append({
+            'name': m['name'],
+            'title': f"Reduce Purchase — {m['name']}",
+            'why': f"Only {fmt_qty(m['sales'])} units sold, but {fmt_qty(m['purchase'])} units purchased.",
+            'impact': impact,
+            'pv': {'purchase': m['purchase'], 'sales': m['sales']},
+            'detail': [
+                ['SKU', sku_of(m['name'])],
+                ['Warehouse', wh_of(m['name'])],
+                ['Amount', _inr(m['amount'])],
+            ],
+            'row': [m['name'], fmt_qty(m['purchase']), fmt_qty(m['sales']), fmt_qty(m['excess']), m['rec']],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': [],
+        'similar_title': 'Slow-Moving Products',
+        'similar_headers': ['Product', 'Purchased', 'Sold', 'Excess', 'Suggested Buy'],
+        'cards': cards,
     })
 
 

@@ -17,5 +17,8 @@ urlpatterns = [
     path('api/invoice-tax-query/', views.invoice_tax_query_api, name='invoice_tax_query_api'),
     path('api/inventory-query/', views.inventory_query_api, name='inventory_query_api'),
     path('api/interpret/', views.interpret_api, name='interpret_api'),
+    path('api/report/customer-collection/', views.report_customer_collection_api, name='report_customer_collection_api'),
+    path('api/report/supplier-payment/', views.report_supplier_payment_api, name='report_supplier_payment_api'),
+    path('api/report/slow-moving/', views.report_slow_moving_api, name='report_slow_moving_api'),
     path('api/export-pdf/', views.export_pdf_api, name='export_pdf_api'),
 ]

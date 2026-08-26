@@ -7,6 +7,14 @@ const clearChatBtn = document.getElementById("clearChatBtn");
 const menuToggleBtn = document.getElementById("menuToggle");
 const sidebar = document.getElementById("sidebar");
 const sidebarOverlay = document.getElementById("sidebarOverlay");
+const composerEl = document.querySelector(".chat-input-wrapper");
+const reportsView = document.getElementById("reportsView");
+
+// The Reports view is display-only (no chat), so it hides the composer. Every
+// chat-driven module shows it again.
+function setComposerVisible(visible) {
+  if (composerEl) composerEl.style.display = visible ? "" : "none";
+}
 
 themeToggleBtn &&
   themeToggleBtn.addEventListener("click", () => {
@@ -31,6 +39,9 @@ function resetAppToDefaultState() {
     chatTitle.innerText = "Intelligere";
   }
 
+  if (reportsView) reportsView.style.display = "none";
+  chatBody.style.display = "";
+  setComposerVisible(true);
   renderCompanySelect();
   renderPebbleDock([], null);
 
@@ -2113,9 +2124,642 @@ function handlePebbleClick(bubble) {
   dispatchFilterAction(bubble.key);
 }
 
+// ---------------------------------------------------------------------------
+// Reports — "AI Business Recommendations" action center. Display-only: no chat,
+// no queries, no backend. Static values (exactly as specified) rendered as
+// recommendation cards with category + priority filters, a report-specific
+// visualization each, and an expandable Similar Results section.
+// ---------------------------------------------------------------------------
+const AIR_PRI = {
+  critical: { label: "Critical", dot: "🔴", cls: "crit" },
+  high: { label: "High", dot: "🟠", cls: "high" },
+  medium: { label: "Medium", dot: "🟡", cls: "med" },
+  good: { label: "Good", dot: "🟢", cls: "good" },
+};
+
+const AIR_REPORTS = [
+  {
+    priority: "critical", filter: "Inventory", category: "Inventory",
+    title: "Purchase Item X — 500 Units",
+    problem: "Item X may finish in 12 days.",
+    why: "Supplier delivery takes 18 days.",
+    impact: "The company may run out of stock before the next delivery arrives.",
+    action: "Buy 500 units now.",
+    buttons: ["Purchase Now"],
+    visual: { type: "compare-days", data: { stockLabel: "Expected stock availability", stock: 12, deliveryLabel: "Supplier delivery", delivery: 18 } },
+    similar: { title: "Similar Items", headers: ["Product", "Stock-out", "Delivery Time", "Recommendation"], rows: [["Item X", "12 days", "18 days", "Buy 500"], ["Item Y", "8 days", "15 days", "Buy 300"], ["Item Z", "25 days", "10 days", "No Action"]] },
+  },
+  {
+    priority: "critical", filter: "Purchase", category: "Purchase Order",
+    title: "Open PO Short by 200 Units",
+    problem: "Existing open PO may not cover upcoming demand.",
+    why: "Required quantity is 500 units, while only 300 units are currently on order.",
+    impact: "Potential 200-unit shortage.",
+    action: "Order 200 additional units.",
+    buttons: ["Create Additional PO"],
+    visual: { type: "qty-bars", data: { required: 500, openpo: 300, shortfall: 200 } },
+    similar: { title: "Similar Results", headers: ["Product", "Requirement", "Open PO", "Shortfall"], rows: [["Product A", 500, 300, 200], ["Product B", 800, 650, 150], ["Product C", 400, 450, 0]] },
+  },
+  {
+    priority: "good", filter: "Inventory", category: "Inventory Transfer",
+    title: "Use Existing Stock Instead of Purchasing",
+    problem: "The company is planning to purchase Item Y.",
+    why: "Another warehouse already has 400 extra units.",
+    impact: "A new purchase would unnecessarily block working capital.",
+    action: "Transfer and use the existing 400 units first.",
+    buttons: ["Transfer Stock"],
+    visual: { type: "transfer", data: { from: "Warehouse B", fromQty: 400, to: "Warehouse A", toQty: 50, qty: 400 } },
+    similar: { title: "Warehouse Stock", headers: ["Warehouse", "Available", "Status"], rows: [["Warehouse A", "50", "🔴 Low"], ["Warehouse B", "400", "🟢 Excess"]] },
+  },
+  {
+    priority: "critical", filter: "Customers", category: "Customer Collection",
+    dynamic: { url: REPORT_CC_URL, mainStyle: "strip", buttonStyle: "customer" },
+    title: "Collect ₹15,00,370 — M CHEMICALS",
+    problem: "Customer payment is severely overdue.",
+    why: "₹15,00,370 has been overdue for 794 days.",
+    impact: "Your cash is blocked.",
+    action: "Contact M CHEMICALS first for payment collection.",
+    buttons: ["Contact Customer", "View Outstanding"],
+    visual: { type: "hero-finance", data: { amount: "₹15,00,370", amountLabel: "Outstanding", days: "794", daysLabel: "Days Overdue", warning: true } },
+    similar: { title: "Similar Results", headers: ["Customer", "Overdue", "Days Late", "Action"], rows: [["M CHEMICALS", "₹15,00,370", "794", "🔴 Contact Now"], ["LION COLOR", "₹16,96,780", "271", "🟠 Follow Up"], ["Bluetron", "₹2,00,000", "393", "🟡 Monitor"]] },
+  },
+  {
+    priority: "critical", filter: "Suppliers", category: "Supplier Payment",
+    dynamic: { url: REPORT_SP_URL, mainStyle: "strip", buttonStyle: "supplier" },
+    title: "Pay ₹4,62,560 — G IMPAX",
+    problem: "Supplier payment is overdue.",
+    why: "G IMPAX supplies an important raw material.",
+    impact: "Delayed payment may affect future supply.",
+    action: "Prioritize payment of ₹4,62,560 to G IMPAX.",
+    buttons: ["Pay Now"],
+    visual: { type: "hero-finance", data: { amount: "₹4,62,560", amountLabel: "Payment Due", days: "306", daysLabel: "Days Late", tag: "Critical supplier" } },
+    similar: { title: "Similar Suppliers", headers: ["Supplier", "Overdue", "Days Late", "Importance", "Action"], rows: [["G IMPAX", "₹4,62,560", "306", "Critical", "🔴 Pay Now"], ["S N SALES", "₹3,315", "288", "High", "🟠 Pay Urgently"], ["VIVEK IND", "₹2,370", "321", "Medium", "🟡 Schedule"]] },
+  },
+  {
+    priority: "high", filter: "Inventory", category: "Inventory",
+    dynamic: { url: REPORT_SM_URL, mainStyle: "pv", buttonStyle: "product" },
+    title: "Reduce Purchase — ABC Product",
+    problem: "ABC Product is selling very slowly.",
+    why: "Only 50 units are sold per month, but 200 units are purchased.",
+    impact: "Excess inventory is blocking ₹10,000.",
+    action: "Reduce the next purchase to around 50–75 units.",
+    buttons: ["Adjust Purchase"],
+    visual: { type: "pv-bars", data: { purchase: 200, sales: 50 } },
+    similar: { title: "Similar Products", headers: ["Product", "Purchase / Month", "Sales / Month", "Excess", "Recommendation"], rows: [["ABC", 200, 50, 150, "Buy 50–75"], ["XYZ", 150, 40, 110, "Buy 40–60"], ["OPQ", 100, 55, 45, "Buy 55–70"]] },
+  },
+  {
+    priority: "high", filter: "Suppliers", category: "Supplier Performance",
+    title: "Find Alternative Supplier for Aadarsh Engineering",
+    problem: "Aadarsh Engineering is frequently delaying deliveries.",
+    why: "Average delivery time increased from 15 days to 20 days.",
+    impact: "Production/selling may stop due to late material.",
+    action: "Start purchasing from or evaluating a reliable alternative supplier.",
+    buttons: ["Compare Suppliers"],
+    visual: { type: "delivery-change", data: { from: 15, to: 20, delta: "+5 days" } },
+    similar: { title: "Similar Suppliers", headers: ["Supplier", "Avg Delivery Time", "Change", "Recommendation"], rows: [["Aadarsh Engineering", "20 days", "+5 days", "🔴 Risk"], ["Aakar Sales & Services", "10 days", "0 days", "🟢 Best"]] },
+  },
+  {
+    priority: "high", filter: "Suppliers", category: "Supplier Allocation",
+    title: "Shift Purchase Allocation",
+    problem: "One supplier is performing significantly worse than another supplier.",
+    why: "ABC delivers only 70% of orders on time, while XYZ delivers 95%.",
+    impact: "Continued high allocation to ABC may increase delivery risk.",
+    action: "Move more purchases from ABC to XYZ.",
+    buttons: ["Review Allocation"],
+    visual: { type: "allocation", data: { current: [["ABC", 70], ["XYZ", 30]], recommended: [["ABC", 30], ["XYZ", 70]] } },
+    similar: { title: "Comparison", headers: ["Supplier", "On-Time Delivery", "Current Allocation", "Recommended Allocation"], rows: [["ABC", "70%", "70%", "30%"], ["XYZ", "95%", "30%", "70%"]] },
+  },
+  {
+    priority: "high", filter: "Inventory", category: "Inventory",
+    title: "Purchase Earlier for Item P",
+    problem: "Item P often reaches low stock before delivery.",
+    why: "Supplier usually takes 25 days instead of the expected 15 days.",
+    impact: "Higher chance of stock shortage.",
+    action: "Place the order earlier to account for the actual delivery time.",
+    buttons: ["Review Purchase Timing"],
+    visual: { type: "timeline-steps", data: { expected: 15, actual: 25, delta: 10 } },
+    similar: null,
+  },
+  {
+    priority: "critical", filter: "Finance", category: "Invoice Collection",
+    title: "Collect ₹30,870 — Shakti Enterprises",
+    problem: "Invoice INV/02/25-26 is overdue.",
+    why: "The invoice is overdue by 56 days.",
+    impact: "₹30,870 has been blocked for 56 days.",
+    action: "Follow up with Shakti Enterprises immediately.",
+    buttons: ["Contact Customer", "View Invoice"],
+    visual: { type: "hero-finance", data: { amount: "₹30,870", amountLabel: "Invoice Amount", days: "56", daysLabel: "Days Overdue", warning: true } },
+    similar: { title: "Invoice Information", headers: ["Invoice", "Amount", "Overdue"], rows: [["INV/02/25-26", "₹30,870", "56 days"]] },
+  },
+  {
+    priority: "critical", filter: "Customers", category: "Customer Collection",
+    title: "High-Value Receivable — Immediate Attention",
+    problem: "A high-value customer payment remains unpaid for a very long period.",
+    why: "M CHEMICALS has ₹15,00,370 outstanding for 794 days.",
+    impact: "A significant amount of cash is blocked.",
+    action: "Give this customer the highest collection priority.",
+    buttons: ["Contact Customer"],
+    visual: { type: "hero-finance", data: { name: "M CHEMICALS", amount: "₹15,00,370", amountLabel: "Outstanding", days: "794", daysLabel: "Days Overdue", warning: true } },
+    similar: { title: "Similar High-Value Receivables", headers: ["Customer", "Outstanding", "Days Late", "Priority"], rows: [["M CHEMICALS", "₹15.00L", "794", "🔴 Critical"], ["LION COLOR", "₹16.97L", "271", "🟠 High"], ["Bluetron", "₹2.00L", "393", "🟠 High"]] },
+  },
+];
+
+function airBar(label, pct, cls, valueText) {
+  const w = Math.max(3, Math.min(100, pct));
+  return `
+    <div class="air-bar-row">
+      <span class="air-bar-label">${escapeHtml(label)}</span>
+      <span class="air-bar-track"><span class="air-bar-fill ${cls}" style="width:${w}%"></span></span>
+      <span class="air-bar-val">${escapeHtml(valueText)}</span>
+    </div>`;
+}
+
+function renderAirVisual(v) {
+  if (!v) return "";
+  const d = v.data;
+  switch (v.type) {
+    case "compare-days": {
+      const max = Math.max(d.stock, d.delivery);
+      const gap = d.delivery - d.stock;
+      return `<div class="air-viz">
+        ${airBar(d.stockLabel, (d.stock / max) * 100, "bar-ok", d.stock + " days")}
+        ${airBar(d.deliveryLabel, (d.delivery / max) * 100, "bar-danger", d.delivery + " days")}
+        ${gap > 0 ? `<div class="air-risk">⚠ Stock runs out ~${gap} days before delivery arrives</div>` : ""}
+      </div>`;
+    }
+    case "qty-bars": {
+      const max = Math.max(d.required, d.openpo) || 1;
+      return `<div class="air-viz">
+        ${airBar("Required", (d.required / max) * 100, "bar-blue", String(d.required))}
+        ${airBar("Open PO", (d.openpo / max) * 100, "bar-ok", String(d.openpo))}
+        <div class="air-callout air-callout-danger">Shortfall <b>${d.shortfall}</b> units</div>
+      </div>`;
+    }
+    case "transfer": {
+      return `<div class="air-viz air-transfer">
+        <div class="air-wh air-wh-excess"><div class="air-wh-name">${escapeHtml(d.from)}</div><div class="air-wh-qty">${d.fromQty}</div><div class="air-wh-tag">🟢 Excess</div></div>
+        <div class="air-transfer-mid"><div class="air-transfer-qty">${d.qty} units</div><div class="air-transfer-arrow">→</div></div>
+        <div class="air-wh air-wh-low"><div class="air-wh-name">${escapeHtml(d.to)}</div><div class="air-wh-qty">${d.toQty}</div><div class="air-wh-tag">🔴 Low</div></div>
+      </div>`;
+    }
+    case "record-strip": {
+      // One record shown horizontally: name + labelled fields (no title/hero).
+      const headers = d.headers || [];
+      const row = d.row || [];
+      const fields = row
+        .slice(1)
+        .map((v, i) => `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`)
+        .join("");
+      return `<div class="air-viz air-record-strip">
+        <span class="cc-name">${escapeHtml(String(row[0] || ""))}</span>
+        ${fields}
+      </div>`;
+    }
+    case "hero-finance": {
+      return `<div class="air-viz air-hero ${d.warning ? "air-hero-warn" : ""}">
+        ${d.name ? `<div class="air-hero-name">${escapeHtml(d.name)}</div>` : ""}
+        <div class="air-hero-metrics">
+          <div class="air-metric"><div class="air-metric-val">${escapeHtml(d.amount)}</div><div class="air-metric-lbl">${escapeHtml(d.amountLabel)}</div></div>
+          <div class="air-metric"><div class="air-metric-val air-danger">${escapeHtml(d.days)}</div><div class="air-metric-lbl">${escapeHtml(d.daysLabel)}</div></div>
+        </div>
+        ${d.tag ? `<div class="air-hero-tag">${escapeHtml(d.tag)}</div>` : ""}
+      </div>`;
+    }
+    case "pv-bars": {
+      const max = Math.max(d.purchase, d.sales) || 1;
+      const excess = d.purchase - d.sales;
+      return `<div class="air-viz">
+        ${airBar("Purchase", (d.purchase / max) * 100, "bar-warn", d.purchase + " /mo")}
+        ${airBar("Sales", (d.sales / max) * 100, "bar-ok", d.sales + " /mo")}
+        <div class="air-callout air-callout-warn">Excess <b>${excess}</b> units / month</div>
+      </div>`;
+    }
+    case "delivery-change": {
+      return `<div class="air-viz air-change">
+        <span class="air-change-from">${d.from} days</span>
+        <span class="air-change-arrow">→</span>
+        <span class="air-change-to">${d.to} days</span>
+        <span class="air-change-delta">${escapeHtml(d.delta)}</span>
+      </div>`;
+    }
+    case "allocation": {
+      const block = (title, rows) => `<div class="air-alloc-block"><div class="air-alloc-title">${title}</div>${rows
+        .map(([name, pct]) => airBar(name, pct, name === "ABC" ? "bar-warn" : "bar-ok", pct + "%"))
+        .join("")}</div>`;
+      return `<div class="air-viz air-alloc">
+        ${block("Current Allocation", d.current)}
+        ${block("Recommended Allocation", d.recommended)}
+      </div>`;
+    }
+    case "timeline-steps": {
+      return `<div class="air-viz air-timeline">
+        <div class="air-tl-node">Order</div>
+        <div class="air-tl-bar"><span class="air-tl-expected" style="flex:${d.expected}">Expected ${d.expected}d</span><span class="air-tl-extra" style="flex:${d.delta}">+${d.delta}d</span></div>
+        <div class="air-tl-node">Delivery<small>${d.actual}d actual</small></div>
+      </div>`;
+    }
+    default:
+      return "";
+  }
+}
+
+function renderAirSimilar(similar) {
+  if (!similar) return "";
+  const head = similar.headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
+  const body = similar.rows
+    .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`)
+    .join("");
+  return `<div class="air-similar">
+      <div class="air-similar-title">${escapeHtml(similar.title)}</div>
+      <div class="air-table-wrap"><table class="air-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+    </div>`;
+}
+
+// Similar Result as a horizontal carousel — one record at a time (name +
+// labelled fields in a single row), stepped through with left/right arrows.
+// skipFirst drops the top record (it's already the card's headline).
+function renderAirCarousel(similar, skipFirst) {
+  if (!similar) return "";
+  const headers = similar.headers || [];
+  const rows = (skipFirst ? similar.rows.slice(1) : similar.rows).slice(0, 5);
+  if (!rows.length) return `<div class="air-empty">No other records.</div>`;
+  const slides = rows
+    .map((row, idx) => {
+      const fields = row
+        .slice(1)
+        .map((v, i) => `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`)
+        .join("");
+      return `<div class="air-car-slide ${idx === 0 ? "active" : ""}" data-slide="${idx}">
+          <span class="cc-name">${escapeHtml(String(row[0]))}</span>
+          ${fields}
+        </div>`;
+    })
+    .join("");
+  return `<div class="air-carousel" data-index="0" data-count="${rows.length}">
+      <button type="button" class="air-car-btn air-car-prev" aria-label="Previous">‹</button>
+      <div class="air-car-viewport">${slides}</div>
+      <button type="button" class="air-car-btn air-car-next" aria-label="Next">›</button>
+      <div class="air-car-pos"><span class="air-car-current">1</span> / ${rows.length}</div>
+    </div>`;
+}
+
+function renderAirCard(r) {
+  const buttons = r.buttons
+    .map((b, i) => {
+      const label = typeof b === "string" ? b : b.label;
+      const cls = i === 0 ? "air-btn-primary" : "air-btn-ghost";
+      const btn = `<button type="button" class="air-btn ${cls}">${escapeHtml(label)}</button>`;
+      const hover = typeof b === "object" && b.hoverHtml ? b.hoverHtml : "";
+      return hover ? `<span class="air-hover">${btn}<div class="air-hover-pop">${hover}</div></span>` : btn;
+    })
+    .join("");
+  // Why / Impact / Similar Result as toggle pebbles on the right. Their content
+  // shows in the panel below only when tapped; nothing is shown by default.
+  const tabs = [
+    { key: "why", label: "Why" },
+    { key: "impact", label: "Impact" },
+  ];
+  (r.extraTabs || []).forEach((t) => tabs.push({ key: t.key, label: t.label }));
+  if (r.similar) tabs.push({ key: "similar", label: "Similar Result" });
+  const tabBtns = tabs
+    .map((t) => `<button type="button" class="air-tab" data-tab="${t.key}">${t.label}</button>`)
+    .join("");
+  const extraPanels = (r.extraTabs || [])
+    .map((t) => `<div class="air-tab-panel" data-panel="${t.key}">${t.html}</div>`)
+    .join("");
+  const panels = `
+    <div class="air-tab-panel" data-panel="why">${escapeHtml(r.why)}</div>
+    <div class="air-tab-panel" data-panel="impact">${escapeHtml(r.impact)}</div>
+    ${extraPanels}
+    ${r.similar ? `<div class="air-tab-panel" data-panel="similar">${renderAirSimilar(r.similar)}</div>` : ""}
+  `;
+  return `
+    <article class="air-card">
+      ${r.title ? `<h3 class="air-title">${escapeHtml(r.title)}</h3>` : ""}
+      ${renderAirVisual(r.visual)}
+      <div class="air-actions">
+        <div class="air-actions-left">${buttons}</div>
+        <div class="air-tabs">${tabBtns}</div>
+      </div>
+      <div class="air-tab-content">${panels}</div>
+    </article>`;
+}
+
+const AIR_CATEGORIES = ["All", "Inventory", "Purchase", "Suppliers", "Customers", "Finance"];
+const AIR_PRIORITIES = ["All", "Critical", "High", "Medium"];
+
+// The report "type" headings shown on the index screen (index-aligned with
+// AIR_REPORTS). Clicking one opens that report's detail screen.
+const AIR_HEADINGS = [
+  "When & How Much to Purchase",
+  "Is Existing Open PO Enough?",
+  "Use Excess Stock First",
+  "Customer Collection Priority",
+  "Supplier Payment Priority",
+  "Reduce Purchase for Slow-Moving Item",
+  "Find Alternative Supplier",
+  "Change Supplier Allocation",
+  "Purchase Earlier",
+  "Immediate Invoice Collection",
+  "High-Value Overdue Receivable",
+];
+
+// Reports dashboard: an accordion of all 11 report headings. Clicking a heading
+// drops down its recommendation card inline (report 4 loads live from recPay).
+function renderReportsView() {
+  const chips = (type, values) =>
+    values
+      .map((v, i) => `<button type="button" class="air-chip ${i === 0 ? "active" : ""}" data-ftype="${type}" data-fval="${v}">${v}</button>`)
+      .join("");
+  const items = AIR_REPORTS.map((r, i) => {
+    const pri = AIR_PRI[r.priority] || AIR_PRI.medium;
+    return `
+      <div class="air-acc-item pri-${pri.cls}" data-report-index="${i}" data-cat="${escapeHtml(r.filter)}" data-pri="${r.priority}">
+        <button type="button" class="air-acc-header">
+          <span class="air-idx-num">${i + 1}</span>
+          <span class="air-idx-body">
+            <span class="air-idx-heading">${escapeHtml(AIR_HEADINGS[i])}</span>
+            <span class="air-idx-meta">
+              <span class="air-pri pri-${pri.cls}">${pri.dot} ${pri.label}</span>
+              <span class="air-idx-cat">${escapeHtml(r.category)}</span>
+            </span>
+          </span>
+          <span class="air-idx-chevron">▾</span>
+        </button>
+        <div class="air-acc-body"><div class="air-acc-card" id="accCard-${i}"></div></div>
+      </div>`;
+  }).join("");
+  return `
+    <div class="air-view">
+      <div class="air-head">
+        <h2>AI Business Recommendations</h2>
+        <div class="air-count"><b>${AIR_REPORTS.length}</b> Recommendations</div>
+        <p class="air-sub">Tap a report to expand its recommendation and similar results.</p>
+      </div>
+      <div class="air-filters">
+        <div class="air-filter-group" data-group="cat"><span class="air-filter-label">Category</span>${chips("cat", AIR_CATEGORIES)}</div>
+        <div class="air-filter-group" data-group="pri"><span class="air-filter-label">Priority</span>${chips("pri", AIR_PRIORITIES)}</div>
+      </div>
+      <div class="air-accordion" id="airIndex">${items}</div>
+      <div class="air-empty" id="airEmpty" style="display:none;">No reports match these filters.</div>
+    </div>`;
+}
+
+// Fill an accordion slot with its card (static: render now; dynamic: fetch live).
+function fillReportCard(i) {
+  const slot = document.getElementById(`accCard-${i}`);
+  if (!slot || slot.dataset.loaded) return;
+  const r = AIR_REPORTS[i];
+  slot.dataset.loaded = "1";
+  if (r.dynamic) {
+    slot.innerHTML = `<div class="air-loading">Loading live data…</div>`;
+    loadDynamicReport(i, slot);
+  } else {
+    slot.innerHTML = renderAirCard(r);
+  }
+}
+
+// Live data fetched per dynamic report, kept so the main-company carousel can
+// re-render without re-fetching. Keyed by report index.
+const DYN_REPORT_DATA = {};
+
+// Build a card object for company `k` of a dynamic report: its own hero/title/
+// why/impact, plus a Similar Result table of the OTHER companies (top 4).
+function dynReportR(data, k) {
+  const c = data.cards[k];
+  const others = data.cards.filter((_, i) => i !== k).map((cc) => cc.row);
+  const r = {
+    why: c.why,
+    impact: c.impact,
+    similar: { title: data.similar_title, headers: data.similar_headers, rows: others },
+  };
+  if (data._mainStyle === "strip") {
+    // No title line, no hero box — just the record shown horizontally.
+    r.title = "";
+    r.visual = { type: "record-strip", data: { headers: data.similar_headers, row: c.row } };
+  } else if (data._mainStyle === "pv") {
+    // Report 6: keep title, show purchase-vs-sales bars for this product.
+    r.title = c.title;
+    r.visual = { type: "pv-bars", data: c.pv };
+  } else {
+    r.title = c.title;
+    r.visual = { type: "hero-finance", data: { ...c.hero, warning: true } };
+  }
+  // Buttons per report: customer gets Contact (phone/email hover) + View
+  // Outstanding (top-5 hover); "none" hides buttons; default uses backend list.
+  if (data._buttonStyle === "customer") {
+    // Contact Customer keeps a small phone/email hover; View Outstanding fires a
+    // table (in the panel below) of this customer's open invoices.
+    r.buttons = [
+      {
+        label: "Contact Customer",
+        hoverHtml:
+          `<div class="air-hover-title">Contact ${escapeHtml(c.name)}</div>` +
+          `<div class="air-hover-line">📞 ${c.phone ? escapeHtml(c.phone) : "—"}</div>` +
+          `<div class="air-hover-line">✉ ${c.email ? escapeHtml(c.email) : "—"}</div>`,
+      },
+    ];
+    const rows = (c.outstanding || []).map((o) => [
+      o.invoice_no,
+      o.amount,
+      o.due || "—",
+      o.days > 0 ? `${o.days} days` : "—",
+    ]);
+    r.extraTabs = [{
+      key: "outstanding",
+      label: "View Outstanding",
+      html: rows.length
+        ? renderAirSimilar({
+            title: `Outstanding — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`,
+            headers: ["Invoice", "Amount", "Due", "Days Late"],
+            rows,
+          })
+        : `<div class="air-empty">No open invoices.</div>`,
+    }];
+  } else if (data._buttonStyle === "supplier") {
+    // No buttons; an "Invoices" tab firing a table of this supplier's invoices.
+    r.buttons = [];
+    const rows = (c.outstanding || []).map((o) => [
+      o.invoice_no,
+      o.amount,
+      o.due || "—",
+      o.days > 0 ? `${o.days} days` : "—",
+    ]);
+    r.extraTabs = [{
+      key: "invoices",
+      label: "Invoices",
+      html: rows.length
+        ? renderAirSimilar({
+            title: `Invoices — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`,
+            headers: ["Invoice", "Amount", "Due", "Days Late"],
+            rows,
+          })
+        : `<div class="air-empty">No open invoices.</div>`,
+    }];
+  } else if (data._buttonStyle === "product") {
+    // Product Detail button with a hover showing SKU, Warehouse and Amount.
+    const lines = (c.detail || [])
+      .map(([k, v]) => `<div class="air-hover-line"><b>${escapeHtml(k)}:</b> ${escapeHtml(String(v))}</div>`)
+      .join("");
+    r.buttons = [{
+      label: "Product Detail",
+      hoverHtml: `<div class="air-hover-title">${escapeHtml(c.name)}</div>${lines}`,
+    }];
+  } else if (data._buttonStyle === "none") {
+    r.buttons = [];
+  } else {
+    r.buttons = data.buttons || [];
+  }
+  return r;
+}
+
+// Main card = a carousel across the top 5 companies (left/right switch). The
+// hero/title/text and the Similar Result table regenerate for each company.
+function renderDynReport(data) {
+  const count = data.cards.length;
+  return `
+    <div class="air-dyn" data-index="0" data-count="${count}">
+      <div class="air-dyn-nav">
+        <button type="button" class="air-btn air-btn-ghost air-main-prev" aria-label="Previous company">‹ Prev</button>
+        <span class="air-main-pos"><b class="air-main-cur">1</b> / ${count} companies</span>
+        <button type="button" class="air-btn air-btn-ghost air-main-next" aria-label="Next company">Next ›</button>
+      </div>
+      <div class="air-dyn-card">${renderAirCard(dynReportR(data, 0))}</div>
+    </div>`;
+}
+
+// Fetch a dynamic report (reports 4 & 5, computed live from recPay) and render
+// the top-5 main-company carousel.
+async function loadDynamicReport(i, slot) {
+  slot = slot || document.getElementById(`accCard-${i}`);
+  if (!slot) return;
+  const cfg = (AIR_REPORTS[i] && AIR_REPORTS[i].dynamic) || {};
+  try {
+    const params = new URLSearchParams();
+    if (currentCompanyId) params.set("company_id", currentCompanyId);
+    const res = await fetch(`${cfg.url}?${params.toString()}`);
+    const data = await res.json();
+    if (!data.found) {
+      slot.innerHTML = `<div class="air-empty">No records found${data.company_name ? " for " + escapeHtml(data.company_name) : ""}.</div>`;
+      return;
+    }
+    if (!data.cards || !data.cards.length) {
+      slot.innerHTML = `<div class="air-empty">No records found.</div>`;
+      return;
+    }
+    data._mainStyle = cfg.mainStyle || "hero";
+    data._buttonStyle = cfg.buttonStyle || "default";
+    DYN_REPORT_DATA[i] = data;
+    slot.innerHTML = renderDynReport(data);
+  } catch (err) {
+    slot.dataset.loaded = "";
+    slot.innerHTML = `<div class="air-empty">Couldn't load live data. Please try again.</div>`;
+  }
+}
+
+function applyAirFilters() {
+  const list = document.getElementById("airIndex");
+  if (!list) return;
+  const catBtn = document.querySelector('.air-filter-group[data-group="cat"] .air-chip.active');
+  const priBtn = document.querySelector('.air-filter-group[data-group="pri"] .air-chip.active');
+  const cat = catBtn ? catBtn.dataset.fval : "All";
+  const pri = priBtn ? priBtn.dataset.fval.toLowerCase() : "all";
+  let shown = 0;
+  list.querySelectorAll(".air-acc-item").forEach((item) => {
+    const okCat = cat === "All" || item.dataset.cat === cat;
+    const okPri = pri === "all" || item.dataset.pri === pri;
+    const show = okCat && okPri;
+    item.style.display = show ? "" : "none";
+    if (show) shown++;
+  });
+  const empty = document.getElementById("airEmpty");
+  if (empty) empty.style.display = shown ? "none" : "";
+  const count = document.querySelector(".air-count b");
+  if (count) count.textContent = String(shown);
+}
+
+// Reports dashboard interactions (delegated on the reports container): expand /
+// collapse an accordion item, filter chips, and the per-card "Similar Results".
+if (reportsView) {
+  reportsView.addEventListener("click", (e) => {
+    const header = e.target.closest(".air-acc-header");
+    if (header) {
+      const item = header.closest(".air-acc-item");
+      const idx = Number(item.dataset.reportIndex);
+      const opening = !item.classList.contains("open");
+      item.classList.toggle("open");
+      if (opening) fillReportCard(idx);
+      return;
+    }
+    const chip = e.target.closest(".air-chip");
+    if (chip) {
+      chip
+        .closest(".air-filter-group")
+        .querySelectorAll(".air-chip")
+        .forEach((c) => c.classList.toggle("active", c === chip));
+      applyAirFilters();
+      return;
+    }
+    const mainBtn = e.target.closest(".air-main-prev, .air-main-next");
+    if (mainBtn) {
+      const dyn = mainBtn.closest(".air-dyn");
+      const item = mainBtn.closest(".air-acc-item");
+      const data = item && DYN_REPORT_DATA[Number(item.dataset.reportIndex)];
+      if (!dyn || !data) return;
+      const count = data.cards.length;
+      let k = Number(dyn.dataset.index) || 0;
+      k = mainBtn.classList.contains("air-main-next")
+        ? (k + 1) % count
+        : (k - 1 + count) % count;
+      dyn.dataset.index = k;
+      dyn.querySelector(".air-dyn-card").innerHTML = renderAirCard(dynReportR(data, k));
+      const cur = dyn.querySelector(".air-main-cur");
+      if (cur) cur.textContent = String(k + 1);
+      return;
+    }
+    const tab = e.target.closest(".air-tab");
+    if (tab) {
+      const card = tab.closest(".air-card");
+      const wasActive = tab.classList.contains("active");
+      card.querySelectorAll(".air-tab").forEach((t) => t.classList.remove("active"));
+      card.querySelectorAll(".air-tab-panel").forEach((p) => p.classList.remove("active"));
+      if (!wasActive) {
+        tab.classList.add("active");
+        const panel = card.querySelector(`.air-tab-panel[data-panel="${tab.dataset.tab}"]`);
+        if (panel) panel.classList.add("active");
+      }
+    }
+  });
+}
+
+function openReports() {
+  currentModuleKey = "reports";
+  currentLedger = null;
+  document
+    .querySelectorAll(".module")
+    .forEach((b) => b.classList.toggle("active", b.dataset.module === "reports"));
+  chatTitle.innerText = "Reports";
+
+  // Dedicated dashboard: no company scope, no chat composer. Rendered in its
+  // OWN container (not chatBody) so it never bleeds into the chat history.
+  const sel = document.getElementById("companySelect");
+  if (sel) sel.style.display = "none";
+  setComposerVisible(false);
+  chatBody.style.display = "none";
+  if (reportsView) {
+    reportsView.style.display = "";
+    reportsView.innerHTML = renderReportsView();
+    reportsView.scrollTop = 0;
+  }
+}
+
 function openModule(moduleKey, isInitial) {
   currentModuleKey = moduleKey;
   currentLedger = null;
+  // Leaving the Reports dashboard — restore the chat view + composer.
+  if (reportsView) reportsView.style.display = "none";
+  chatBody.style.display = "";
+  setComposerVisible(true);
 
   document
     .querySelectorAll(".module")
@@ -2145,7 +2789,11 @@ function openModule(moduleKey, isInitial) {
 
 document.querySelectorAll(".module").forEach((btn) => {
   btn.addEventListener("click", () => {
-    openModule(btn.dataset.module, false);
+    if (btn.dataset.module === "reports") {
+      openReports();
+    } else {
+      openModule(btn.dataset.module, false);
+    }
     if (window.innerWidth <= 1024) {
       closeSidebarDrawer();
     }

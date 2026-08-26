@@ -167,6 +167,24 @@
                 <polygon points="12 2 20 7 4 7"></polygon></svg></span
             ><span>Bank Statement</span>
           </button>
+          <button class="module" data-module="reports">
+            <span class="m-icon"
+              ><svg
+                stroke="currentColor"
+                fill="none"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                height="1em"
+                width="1em"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path d="M9 18h6"></path>
+                <path d="M10 22h4"></path>
+                <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"></path></svg></span
+            ><span>Reports</span>
+          </button>
           <div class="sidebar-most-used" id="sidebarMostUsed"></div>
         </nav>
       </aside>
@@ -243,6 +261,7 @@
           </div>
         </div>
         <div class="chat-body" id="chatBody"></div>
+        <div class="reports-view" id="reportsView" style="display: none"></div>
         <div class="chat-input-wrapper">
           <div class="chat-input-stack">
             <div class="pebble-dock" id="pebbleDock"></div>
@@ -292,6 +311,9 @@
       const INVENTORY_QUERY_URL = "{% url 'ledger:inventory_query_api' %}";
       const EXPORT_PDF_URL = "{% url 'ledger:export_pdf_api' %}";
       const INTERPRET_URL = "{% url 'ledger:interpret_api' %}";
+      const REPORT_CC_URL = "{% url 'ledger:report_customer_collection_api' %}";
+      const REPORT_SP_URL = "{% url 'ledger:report_supplier_payment_api' %}";
+      const REPORT_SM_URL = "{% url 'ledger:report_slow_moving_api' %}";
       const LOGO_URL = "{% static 'ledger/logo.png' %}";
     </script>
     <script src="{% static 'ledger/js/main.js' %}?v={% now 'U' %}"></script>
