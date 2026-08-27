@@ -1407,3 +1407,61 @@ tr.clickable-row:hover td {
 .air-hover-row b { color: var(--accent-1); }
 
 .air-hover-sub { color: var(--text-secondary); font-size: 0.76rem; margin-bottom: 4px; }
+
+/* Report 4 "wide" layout: strip + nav on top, dropdown pills, contact button */
+.air-wtop {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--border-color);
+  margin-bottom: 16px;
+}
+.air-wstrip { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; }
+.air-wnav { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.air-pills {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 2px;
+}
+.air-pill {
+  display: inline-flex; align-items: center; justify-content: space-between;
+  gap: 16px; border-radius: 10px; padding: 10px 16px; min-width: 0;
+}
+.air-pill .air-caret { color: var(--text-secondary); font-size: 0.8rem; }
+.air-pill.active .air-caret { color: #fff; }
+.air-actions .air-btn-primary { margin-top: 4px; }
+@media (max-width: 720px) {
+  .air-pills { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Report 4 wide accordion header: title | strip | prev/next | chevron in a row */
+.air-acc-header-wide {
+  display: flex; align-items: center; gap: 16px; width: 100%;
+  padding: 14px 16px; text-align: left;
+}
+.air-acc-titlewrap { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; cursor: pointer; }
+.air-wide-live {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  flex: 1; flex-wrap: wrap; padding-left: 18px; border-left: 1px solid var(--border-color);
+}
+/* Report 6: Purchase vs Sales graph shown inline in the header space */
+.air-hgraph { flex: 1 1 240px; max-width: 400px; }
+.air-hgraph .air-viz { margin: 0; padding: 8px 12px; }
+.air-hgraph .air-bar-row { margin: 4px 0; }
+.air-hgraph .air-bar-track { height: 12px; }
+.air-hgraph .air-bar-label { flex-basis: 26%; font-size: 0.72rem; }
+.air-hgraph .air-callout { margin-top: 6px; font-size: 0.78rem; }
+.air-acc-item:not(.open) .air-wide-live { display: none; }
+.air-acc-header-wide .air-idx-chevron { margin-left: auto; flex: 0 0 auto; cursor: pointer; }
+
+.air-pills { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+/* Report 6 graph panel: fit the view (narrower) with taller bars */
+.air-graph { max-width: 560px; }
+.air-graph .air-bar-track { height: 22px; }
+.air-graph .air-bar-label { flex-basis: 30%; }
+
+/* Wide reports (4/5/6): all sections shown directly, stacked */
+.air-wide-body { display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+.air-section-title { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 6px; }
+
+/* Locked (static) report cards — visible but not expandable */
+.air-acc-item.locked { opacity: 0.55; }
+.air-acc-item.locked .air-acc-header { cursor: not-allowed; }
+.air-acc-item.locked .air-acc-header:hover { background: transparent; }

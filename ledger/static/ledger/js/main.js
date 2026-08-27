@@ -1646,7 +1646,9 @@ let currentModuleKey = null;
 // The dropdown lives in the chat header and is shown for `companyScoped`
 // modules.
 // ---------------------------------------------------------------------------
-const COMPANY_STORAGE_KEY = "ledger-company-id";
+// v2: reset any previously-saved selection so the new default (Intelligere
+// PVT.LTD.) takes effect; user picks still persist from here on.
+const COMPANY_STORAGE_KEY = "ledger-company-id-v2";
 let companies = [];
 let currentCompanyId = null;
 
@@ -1661,11 +1663,16 @@ async function loadCompanies() {
 
   const saved = localStorage.getItem(COMPANY_STORAGE_KEY);
   const savedIsValid = saved && companies.some((c) => String(c.id) === saved);
+  // Default company is Intelligere PVT.LTD. when there's no valid saved choice.
+  const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const preferred = companies.find((c) => norm(c.name) === "intelligerepvtltd");
   currentCompanyId = savedIsValid
     ? saved
-    : companies[0]
-      ? String(companies[0].id)
-      : null;
+    : preferred
+      ? String(preferred.id)
+      : companies[0]
+        ? String(companies[0].id)
+        : null;
 
   renderCompanySelect();
 }
@@ -1695,6 +1702,16 @@ function switchCompany(companyId) {
   currentCompanyId = String(companyId);
   localStorage.setItem(COMPANY_STORAGE_KEY, currentCompanyId);
   currentLedger = null;
+
+  // Reports dashboard: just re-render it for the new company.
+  if (currentModuleKey === "reports") {
+    if (reportsView) {
+      reportsView.innerHTML = renderReportsView();
+      reportsView.scrollTop = 0;
+      expandAllReports();
+    }
+    return;
+  }
 
   const module = MODULES[currentModuleKey];
   const name =
@@ -2173,7 +2190,7 @@ const AIR_REPORTS = [
   },
   {
     priority: "critical", filter: "Customers", category: "Customer Collection",
-    dynamic: { url: REPORT_CC_URL, mainStyle: "strip", buttonStyle: "customer" },
+    dynamic: { url: REPORT_CC_URL, layout: "wide", wideKind: "customer" },
     title: "Collect ₹15,00,370 — M CHEMICALS",
     problem: "Customer payment is severely overdue.",
     why: "₹15,00,370 has been overdue for 794 days.",
@@ -2185,7 +2202,7 @@ const AIR_REPORTS = [
   },
   {
     priority: "critical", filter: "Suppliers", category: "Supplier Payment",
-    dynamic: { url: REPORT_SP_URL, mainStyle: "strip", buttonStyle: "supplier" },
+    dynamic: { url: REPORT_SP_URL, layout: "wide", wideKind: "supplier" },
     title: "Pay ₹4,62,560 — G IMPAX",
     problem: "Supplier payment is overdue.",
     why: "G IMPAX supplies an important raw material.",
@@ -2197,7 +2214,7 @@ const AIR_REPORTS = [
   },
   {
     priority: "high", filter: "Inventory", category: "Inventory",
-    dynamic: { url: REPORT_SM_URL, mainStyle: "pv", buttonStyle: "product" },
+    dynamic: { url: REPORT_SM_URL, layout: "wide", wideKind: "product" },
     title: "Reduce Purchase — ABC Product",
     problem: "ABC Product is selling very slowly.",
     why: "Only 50 units are sold per month, but 200 units are purchased.",
@@ -2473,29 +2490,32 @@ function renderReportsView() {
       .join("");
   const items = AIR_REPORTS.map((r, i) => {
     const pri = AIR_PRI[r.priority] || AIR_PRI.medium;
+    const titleInner = `
+      <span class="air-idx-num">${i + 1}</span>
+      <span class="air-idx-body">
+        <span class="air-idx-heading">${escapeHtml(AIR_HEADINGS[i])}</span>
+        <span class="air-idx-meta">
+          <span class="air-pri pri-${pri.cls}">${pri.dot} ${pri.label}</span>
+          <span class="air-idx-cat">${escapeHtml(r.category)}</span>
+        </span>
+      </span>`;
+    const isWide = r.dynamic && r.dynamic.layout === "wide";
+    const locked = !r.dynamic; // only reports 4/5/6 (dynamic) are active
+    const header = isWide
+      ? `<div class="air-acc-header air-acc-header-wide">
+          <span class="air-acc-toggle air-acc-titlewrap">${titleInner}</span>
+          <div class="air-wide-live" id="wideHead-${i}"></div>
+          <span class="air-acc-toggle air-idx-chevron">▾</span>
+        </div>`
+      : `<button type="button" class="air-acc-header">${titleInner}<span class="air-idx-chevron">${locked ? "🔒" : "▾"}</span></button>`;
     return `
-      <div class="air-acc-item pri-${pri.cls}" data-report-index="${i}" data-cat="${escapeHtml(r.filter)}" data-pri="${r.priority}">
-        <button type="button" class="air-acc-header">
-          <span class="air-idx-num">${i + 1}</span>
-          <span class="air-idx-body">
-            <span class="air-idx-heading">${escapeHtml(AIR_HEADINGS[i])}</span>
-            <span class="air-idx-meta">
-              <span class="air-pri pri-${pri.cls}">${pri.dot} ${pri.label}</span>
-              <span class="air-idx-cat">${escapeHtml(r.category)}</span>
-            </span>
-          </span>
-          <span class="air-idx-chevron">▾</span>
-        </button>
+      <div class="air-acc-item pri-${pri.cls}${locked ? " locked" : ""}" data-report-index="${i}" data-cat="${escapeHtml(r.filter)}" data-pri="${r.priority}">
+        ${header}
         <div class="air-acc-body"><div class="air-acc-card" id="accCard-${i}"></div></div>
       </div>`;
   }).join("");
   return `
     <div class="air-view">
-      <div class="air-head">
-        <h2>AI Business Recommendations</h2>
-        <div class="air-count"><b>${AIR_REPORTS.length}</b> Recommendations</div>
-        <p class="air-sub">Tap a report to expand its recommendation and similar results.</p>
-      </div>
       <div class="air-filters">
         <div class="air-filter-group" data-group="cat"><span class="air-filter-label">Category</span>${chips("cat", AIR_CATEGORIES)}</div>
         <div class="air-filter-group" data-group="pri"><span class="air-filter-label">Priority</span>${chips("pri", AIR_PRIORITIES)}</div>
@@ -2503,6 +2523,15 @@ function renderReportsView() {
       <div class="air-accordion" id="airIndex">${items}</div>
       <div class="air-empty" id="airEmpty" style="display:none;">No reports match these filters.</div>
     </div>`;
+}
+
+// Open every report and render its card directly, so the dashboard shows the
+// cards up front instead of collapsed headings you have to click into.
+function expandAllReports() {
+  document.querySelectorAll("#airIndex .air-acc-item:not(.locked)").forEach((item) => {
+    item.classList.add("open");
+    fillReportCard(Number(item.dataset.reportIndex));
+  });
 }
 
 // Fill an accordion slot with its card (static: render now; dynamic: fetch live).
@@ -2628,6 +2657,79 @@ function renderDynReport(data) {
     </div>`;
 }
 
+// Report 4 "wide" layout is split: the company strip + Prev/Next render INTO the
+// accordion header (same row as the title); the pills + panels + Contact button
+// render in the body.
+function renderWideHead(data, k) {
+  const c = data.cards[k];
+  const count = data.cards.length;
+  const headers = data.similar_headers || [];
+  const stripFields = c.row
+    .slice(1)
+    .map((v, i) => `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`)
+    .join("");
+  const name = data._wideKind === "product" ? `Product: ${c.row[0]}` : String(c.row[0]);
+  const graph = data._wideKind === "product"
+    ? `<div class="air-hgraph">${renderAirVisual({ type: "pv-bars", data: c.pv })}</div>`
+    : "";
+  return `
+      <div class="air-wstrip"><span class="cc-name">${escapeHtml(name)}</span>${stripFields}</div>
+      ${graph}
+      <div class="air-wnav">
+        <button type="button" class="air-btn air-btn-ghost air-main-prev">‹ Prev</button>
+        <span class="air-main-pos"><b class="air-main-cur">${k + 1}</b> / ${count} companies</span>
+        <button type="button" class="air-btn air-btn-ghost air-main-next">Next ›</button>
+      </div>`;
+}
+
+function renderWideBody(data, k) {
+  const c = data.cards[k];
+  const headers = data.similar_headers || [];
+  const others = data.cards.filter((_, i) => i !== k).map((cc) => cc.row);
+  const pill = (key, label) => `<button type="button" class="air-tab air-pill" data-tab="${key}">${label}<span class="air-caret">▾</span></button>`;
+
+  const outRows = (c.outstanding || []).map((o) => [o.invoice_no, o.amount, o.due || "—", o.days > 0 ? `${o.days} days` : "—"]);
+  const invoiceTable = (label) => outRows.length
+    ? renderAirSimilar({ title: `${label} — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`, headers: ["Invoice", "Amount", "Due", "Days Late"], rows: outRows })
+    : `<div class="air-empty">No open invoices.</div>`;
+  const whyImpactPanel = `
+      <div class="air-tab-panel" data-panel="whyimpact">
+        <div class="air-block"><div class="air-block-label lbl-why">Why</div><div class="air-block-text">${escapeHtml(c.why)}</div></div>
+        <div class="air-block" style="margin-top:10px"><div class="air-block-label lbl-impact">Impact</div><div class="air-block-text">${escapeHtml(c.impact)}</div></div>
+      </div>`;
+  const similarPanel = `<div class="air-tab-panel" data-panel="similar">${renderAirSimilar({ title: data.similar_title, headers, rows: others })}</div>`;
+
+  let pills, panels;
+  if (data._wideKind === "product") {
+    const detailLines = (c.detail || [])
+      .map(([kk, v]) => `<div class="air-hover-line"><b>${escapeHtml(kk)}:</b> ${escapeHtml(String(v))}</div>`)
+      .join("");
+    pills = `<div class="air-pills">${pill("whyimpact", "Why Impact")}${pill("detail", "Product Detail")}${pill("similar", "Similar Result")}</div>`;
+    panels = `${whyImpactPanel}
+      <div class="air-tab-panel" data-panel="detail">${detailLines || '<div class="air-empty">No details.</div>'}</div>
+      ${similarPanel}`;
+  } else if (data._wideKind === "supplier") {
+    pills = `<div class="air-pills">${pill("whyimpact", "Why Impact")}${pill("invoices", "Invoices")}${pill("similar", "Similar Result")}</div>`;
+    panels = `${whyImpactPanel}
+      <div class="air-tab-panel" data-panel="invoices">${invoiceTable("Invoices")}</div>
+      ${similarPanel}`;
+  } else {
+    pills = `<div class="air-pills">${pill("contact", "📞 Contact")}${pill("whyimpact", "Why Impact")}${pill("outstanding", "View Outstanding")}${pill("similar", "Similar Result")}</div>`;
+    panels = `
+      <div class="air-tab-panel" data-panel="contact">
+        <div class="air-hover-line">📞 ${c.phone ? escapeHtml(c.phone) : "—"}</div>
+        <div class="air-hover-line">✉ ${c.email ? escapeHtml(c.email) : "—"}</div>
+      </div>
+      ${whyImpactPanel}
+      <div class="air-tab-panel" data-panel="outstanding">${invoiceTable("Outstanding")}</div>
+      ${similarPanel}`;
+  }
+  return `
+      ${pills}
+      <div class="air-tab-content">${panels}</div>
+    `;
+}
+
 // Fetch a dynamic report (reports 4 & 5, computed live from recPay) and render
 // the top-5 main-company carousel.
 async function loadDynamicReport(i, slot) {
@@ -2649,8 +2751,18 @@ async function loadDynamicReport(i, slot) {
     }
     data._mainStyle = cfg.mainStyle || "hero";
     data._buttonStyle = cfg.buttonStyle || "default";
+    data._layout = cfg.layout || "";
+    data._wideKind = cfg.wideKind || "customer";
     DYN_REPORT_DATA[i] = data;
-    slot.innerHTML = renderDynReport(data);
+    if (data._layout === "wide") {
+      const item = document.querySelector(`.air-acc-item[data-report-index="${i}"]`);
+      if (item) item.dataset.dynIndex = "0";
+      const head = document.getElementById(`wideHead-${i}`);
+      if (head) head.innerHTML = renderWideHead(data, 0);
+      slot.innerHTML = renderWideBody(data, 0);
+    } else {
+      slot.innerHTML = renderDynReport(data);
+    }
   } catch (err) {
     slot.dataset.loaded = "";
     slot.innerHTML = `<div class="air-empty">Couldn't load live data. Please try again.</div>`;
@@ -2682,9 +2794,39 @@ function applyAirFilters() {
 // collapse an accordion item, filter chips, and the per-card "Similar Results".
 if (reportsView) {
   reportsView.addEventListener("click", (e) => {
-    const header = e.target.closest(".air-acc-header");
-    if (header) {
-      const item = header.closest(".air-acc-item");
+    // Company switcher first, so it never triggers the header collapse.
+    const mainBtn = e.target.closest(".air-main-prev, .air-main-next");
+    if (mainBtn) {
+      const item = mainBtn.closest(".air-acc-item");
+      const data = item && DYN_REPORT_DATA[Number(item.dataset.reportIndex)];
+      if (!data) return;
+      const count = data.cards.length;
+      const ri = Number(item.dataset.reportIndex);
+      let k = Number(item.dataset.dynIndex || 0);
+      k = mainBtn.classList.contains("air-main-next") ? (k + 1) % count : (k - 1 + count) % count;
+      item.dataset.dynIndex = k;
+      if (data._layout === "wide") {
+        const head = document.getElementById(`wideHead-${ri}`);
+        const body = document.getElementById(`accCard-${ri}`);
+        if (head) head.innerHTML = renderWideHead(data, k);
+        if (body) body.innerHTML = renderWideBody(data, k);
+      } else {
+        const dyn = item.querySelector(".air-dyn");
+        if (dyn) {
+          dyn.dataset.index = k;
+          dyn.querySelector(".air-dyn-card").innerHTML = renderAirCard(dynReportR(data, k));
+          const cur = dyn.querySelector(".air-main-cur");
+          if (cur) cur.textContent = String(k + 1);
+        }
+      }
+      return;
+    }
+    // Expand / collapse. Non-wide: the whole header button. Wide: only the title
+    // wrap or chevron (so clicking the strip doesn't collapse the card).
+    const toggle = e.target.closest(".air-acc-header:not(.air-acc-header-wide), .air-acc-toggle");
+    if (toggle) {
+      const item = toggle.closest(".air-acc-item");
+      if (item.classList.contains("locked")) return; // static cards are locked
       const idx = Number(item.dataset.reportIndex);
       const opening = !item.classList.contains("open");
       item.classList.toggle("open");
@@ -2700,32 +2842,16 @@ if (reportsView) {
       applyAirFilters();
       return;
     }
-    const mainBtn = e.target.closest(".air-main-prev, .air-main-next");
-    if (mainBtn) {
-      const dyn = mainBtn.closest(".air-dyn");
-      const item = mainBtn.closest(".air-acc-item");
-      const data = item && DYN_REPORT_DATA[Number(item.dataset.reportIndex)];
-      if (!dyn || !data) return;
-      const count = data.cards.length;
-      let k = Number(dyn.dataset.index) || 0;
-      k = mainBtn.classList.contains("air-main-next")
-        ? (k + 1) % count
-        : (k - 1 + count) % count;
-      dyn.dataset.index = k;
-      dyn.querySelector(".air-dyn-card").innerHTML = renderAirCard(dynReportR(data, k));
-      const cur = dyn.querySelector(".air-main-cur");
-      if (cur) cur.textContent = String(k + 1);
-      return;
-    }
     const tab = e.target.closest(".air-tab");
     if (tab) {
-      const card = tab.closest(".air-card");
+      const scope = tab.closest(".air-card, .air-acc-card");
+      if (!scope) return;
       const wasActive = tab.classList.contains("active");
-      card.querySelectorAll(".air-tab").forEach((t) => t.classList.remove("active"));
-      card.querySelectorAll(".air-tab-panel").forEach((p) => p.classList.remove("active"));
+      scope.querySelectorAll(".air-tab").forEach((t) => t.classList.remove("active"));
+      scope.querySelectorAll(".air-tab-panel").forEach((p) => p.classList.remove("active"));
       if (!wasActive) {
         tab.classList.add("active");
-        const panel = card.querySelector(`.air-tab-panel[data-panel="${tab.dataset.tab}"]`);
+        const panel = scope.querySelector(`.air-tab-panel[data-panel="${tab.dataset.tab}"]`);
         if (panel) panel.classList.add("active");
       }
     }
@@ -2738,18 +2864,18 @@ function openReports() {
   document
     .querySelectorAll(".module")
     .forEach((b) => b.classList.toggle("active", b.dataset.module === "reports"));
-  chatTitle.innerText = "Reports";
+  chatTitle.innerText = "My I Report";
 
-  // Dedicated dashboard: no company scope, no chat composer. Rendered in its
-  // OWN container (not chatBody) so it never bleeds into the chat history.
-  const sel = document.getElementById("companySelect");
-  if (sel) sel.style.display = "none";
+  // Dedicated dashboard rendered in its OWN container (not chatBody). Company
+  // bar IS shown (reports are company-scoped); the chat composer is hidden.
+  renderCompanySelect();
   setComposerVisible(false);
   chatBody.style.display = "none";
   if (reportsView) {
     reportsView.style.display = "";
     reportsView.innerHTML = renderReportsView();
     reportsView.scrollTop = 0;
+    expandAllReports();
   }
 }
 
