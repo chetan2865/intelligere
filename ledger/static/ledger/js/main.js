@@ -2491,7 +2491,6 @@ function renderReportsView() {
   const items = AIR_REPORTS.map((r, i) => {
     const pri = AIR_PRI[r.priority] || AIR_PRI.medium;
     const titleInner = `
-      // <span class="air-idx-num">${i + 1}</span>
       <span class="air-idx-body">
         <span class="air-idx-heading">${escapeHtml(AIR_HEADINGS[i])}</span>
         <span class="air-idx-meta">
