@@ -2109,8 +2109,9 @@ tr.clickable-row:hover td {
   flex: 0 0 auto;
 }
 .air-pills {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 12px;
   margin-bottom: 2px;
 }
@@ -2133,11 +2134,7 @@ tr.clickable-row:hover td {
 .air-actions .air-btn-primary {
   margin-top: 4px;
 }
-@media (max-width: 720px) {
-  .air-pills {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
+/* Removed grid media query */
 
 /* Report 4 wide accordion header: title | strip | prev/next | chevron in a row */
 .air-acc-header-wide {
@@ -2197,9 +2194,7 @@ tr.clickable-row:hover td {
   cursor: pointer;
 }
 
-.air-pills {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
+/* Removed auto-fit grid */
 
 /* Report 6 graph panel: fit the view (narrower) with taller bars */
 .air-graph {
@@ -2232,8 +2227,12 @@ tr.clickable-row:hover td {
 .air-acc-item.locked {
   opacity: 0.55;
 }
-.air-acc-item.locked .air-acc-header { cursor: not-allowed; }
-.air-acc-item.locked .air-acc-header:hover { background: transparent; }
+.air-acc-item.locked .air-acc-header {
+  cursor: not-allowed;
+}
+.air-acc-item.locked .air-acc-header:hover {
+  background: transparent;
+}
 
 /* Responsive Adjustments for AI Reports */
 @media (max-width: 900px) {
@@ -2261,18 +2260,34 @@ tr.clickable-row:hover td {
   }
 }
 
-@media (max-width: 720px) {
-  .air-pills { grid-template-columns: repeat(2, 1fr) !important; }
-}
+/* Removed responsive grid */
 
 @media (max-width: 560px) {
-  .air-pills { grid-template-columns: 1fr !important; }
-  .air-wide-live { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .air-wnav { width: 100%; justify-content: space-between; }
-  .air-record-strip { flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; }
-  
-  .air-wi-row { flex-direction: column; gap: 12px; }
-  .air-wi-divider { width: 100%; height: 1px; margin: 4px 0; }
+  .air-wide-live {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .air-wnav {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .air-record-strip {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .air-wi-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .air-wi-divider {
+    width: 100%;
+    height: 1px;
+    margin: 4px 0;
+  }
 }
 
 /* Why & Impact row layout */
