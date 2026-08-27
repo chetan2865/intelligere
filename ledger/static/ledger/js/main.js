@@ -2954,8 +2954,11 @@ function renderWideBody(data, k) {
       : `<div class="air-empty">No open invoices.</div>`;
   const whyImpactPanel = `
       <div class="air-tab-panel" data-panel="whyimpact">
-        <div class="air-block"><div class="air-block-label lbl-why">Why</div><div class="air-block-text">${escapeHtml(c.why)}</div></div>
-        <div class="air-block" style="margin-top:10px"><div class="air-block-label lbl-impact">Impact</div><div class="air-block-text">${escapeHtml(c.impact)}</div></div>
+        <div class="air-wi-row">
+          <div class="air-block air-wi-half"><div class="air-block-label lbl-why">Why</div><div class="air-block-text">${escapeHtml(c.why)}</div></div>
+          <div class="air-wi-divider"></div>
+          <div class="air-block air-wi-half"><div class="air-block-label lbl-impact">Impact</div><div class="air-block-text">${escapeHtml(c.impact)}</div></div>
+        </div>
       </div>`;
   const similarPanel = `<div class="air-tab-panel" data-panel="similar">${renderAirSimilar({ title: data.similar_title, headers, rows: others })}</div>`;
 

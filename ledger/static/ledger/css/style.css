@@ -2119,7 +2119,7 @@ tr.clickable-row:hover td {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-radius: 10px;
+  border-radius: 50px;
   padding: 10px 16px;
   min-width: 0;
 }
@@ -2270,4 +2270,22 @@ tr.clickable-row:hover td {
   .air-wide-live { flex-direction: column; align-items: flex-start; gap: 14px; }
   .air-wnav { width: 100%; justify-content: space-between; }
   .air-record-strip { flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; }
+  
+  .air-wi-row { flex-direction: column; gap: 12px; }
+  .air-wi-divider { width: 100%; height: 1px; margin: 4px 0; }
+}
+
+/* Why & Impact row layout */
+.air-wi-row {
+  display: flex;
+  gap: 20px;
+}
+.air-wi-half {
+  flex: 1;
+  min-width: 0;
+}
+.air-wi-divider {
+  width: 1px;
+  background: var(--border-color);
+  margin: 0 4px;
 }
