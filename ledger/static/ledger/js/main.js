@@ -1418,11 +1418,19 @@ const INVENTORY_FILTER_PATTERNS = [
   { key: "dead_stock", patterns: ["\\bdead\\s+stock\\b"] },
   {
     key: "slow_moving",
-    patterns: ["\\bslow[- ]moving\\b", "\\b(least|lowest)\\s+(sold|selling)\\b", "\\bbottom\\s*5\\b"],
+    patterns: [
+      "\\bslow[- ]moving\\b",
+      "\\b(least|lowest)\\s+(sold|selling)\\b",
+      "\\bbottom\\s*5\\b",
+    ],
   },
   {
     key: "fast_moving",
-    patterns: ["\\bfast[- ]moving\\b", "\\b(most|highest|best)\\s+(sold|selling)\\b", "\\btop\\s*5\\b"],
+    patterns: [
+      "\\bfast[- ]moving\\b",
+      "\\b(most|highest|best)\\s+(sold|selling)\\b",
+      "\\btop\\s*5\\b",
+    ],
   },
   { key: "overstock", patterns: ["\\bover[- ]?stock\\b"] },
   {
@@ -2156,40 +2164,92 @@ const AIR_PRI = {
 
 const AIR_REPORTS = [
   {
-    priority: "critical", filter: "Inventory", category: "Inventory",
+    priority: "critical",
+    filter: "Inventory",
+    category: "Inventory",
     title: "Purchase Item X — 500 Units",
     problem: "Item X may finish in 12 days.",
     why: "Supplier delivery takes 18 days.",
-    impact: "The company may run out of stock before the next delivery arrives.",
+    impact:
+      "The company may run out of stock before the next delivery arrives.",
     action: "Buy 500 units now.",
     buttons: ["Purchase Now"],
-    visual: { type: "compare-days", data: { stockLabel: "Expected stock availability", stock: 12, deliveryLabel: "Supplier delivery", delivery: 18 } },
-    similar: { title: "Similar Items", headers: ["Product", "Stock-out", "Delivery Time", "Recommendation"], rows: [["Item X", "12 days", "18 days", "Buy 500"], ["Item Y", "8 days", "15 days", "Buy 300"], ["Item Z", "25 days", "10 days", "No Action"]] },
+    visual: {
+      type: "compare-days",
+      data: {
+        stockLabel: "Expected stock availability",
+        stock: 12,
+        deliveryLabel: "Supplier delivery",
+        delivery: 18,
+      },
+    },
+    similar: {
+      title: "Similar Items",
+      headers: ["Product", "Stock-out", "Delivery Time", "Recommendation"],
+      rows: [
+        ["Item X", "12 days", "18 days", "Buy 500"],
+        ["Item Y", "8 days", "15 days", "Buy 300"],
+        ["Item Z", "25 days", "10 days", "No Action"],
+      ],
+    },
   },
   {
-    priority: "critical", filter: "Purchase", category: "Purchase Order",
+    priority: "critical",
+    filter: "Purchase",
+    category: "Purchase Order",
     title: "Open PO Short by 200 Units",
     problem: "Existing open PO may not cover upcoming demand.",
     why: "Required quantity is 500 units, while only 300 units are currently on order.",
     impact: "Potential 200-unit shortage.",
     action: "Order 200 additional units.",
     buttons: ["Create Additional PO"],
-    visual: { type: "qty-bars", data: { required: 500, openpo: 300, shortfall: 200 } },
-    similar: { title: "Similar Results", headers: ["Product", "Requirement", "Open PO", "Shortfall"], rows: [["Product A", 500, 300, 200], ["Product B", 800, 650, 150], ["Product C", 400, 450, 0]] },
+    visual: {
+      type: "qty-bars",
+      data: { required: 500, openpo: 300, shortfall: 200 },
+    },
+    similar: {
+      title: "Similar Results",
+      headers: ["Product", "Requirement", "Open PO", "Shortfall"],
+      rows: [
+        ["Product A", 500, 300, 200],
+        ["Product B", 800, 650, 150],
+        ["Product C", 400, 450, 0],
+      ],
+    },
   },
   {
-    priority: "good", filter: "Inventory", category: "Inventory Transfer",
+    priority: "good",
+    filter: "Inventory",
+    category: "Inventory Transfer",
     title: "Use Existing Stock Instead of Purchasing",
     problem: "The company is planning to purchase Item Y.",
     why: "Another warehouse already has 400 extra units.",
     impact: "A new purchase would unnecessarily block working capital.",
     action: "Transfer and use the existing 400 units first.",
     buttons: ["Transfer Stock"],
-    visual: { type: "transfer", data: { from: "Warehouse B", fromQty: 400, to: "Warehouse A", toQty: 50, qty: 400 } },
-    similar: { title: "Warehouse Stock", headers: ["Warehouse", "Available", "Status"], rows: [["Warehouse A", "50", "🔴 Low"], ["Warehouse B", "400", "🟢 Excess"]] },
+    visual: {
+      type: "transfer",
+      data: {
+        from: "Warehouse B",
+        fromQty: 400,
+        to: "Warehouse A",
+        toQty: 50,
+        qty: 400,
+      },
+    },
+    similar: {
+      title: "Warehouse Stock",
+      headers: ["Warehouse", "Available", "Status"],
+      rows: [
+        ["Warehouse A", "50", "🔴 Low"],
+        ["Warehouse B", "400", "🟢 Excess"],
+      ],
+    },
   },
   {
-    priority: "critical", filter: "Customers", category: "Customer Collection",
+    priority: "critical",
+    filter: "Customers",
+    category: "Customer Collection",
     dynamic: { url: REPORT_CC_URL, layout: "wide", wideKind: "customer" },
     title: "Collect ₹15,00,370 — M CHEMICALS",
     problem: "Customer payment is severely overdue.",
@@ -2197,11 +2257,30 @@ const AIR_REPORTS = [
     impact: "Your cash is blocked.",
     action: "Contact M CHEMICALS first for payment collection.",
     buttons: ["Contact Customer", "View Outstanding"],
-    visual: { type: "hero-finance", data: { amount: "₹15,00,370", amountLabel: "Outstanding", days: "794", daysLabel: "Days Overdue", warning: true } },
-    similar: { title: "Similar Results", headers: ["Customer", "Overdue", "Days Late", "Action"], rows: [["M CHEMICALS", "₹15,00,370", "794", "🔴 Contact Now"], ["LION COLOR", "₹16,96,780", "271", "🟠 Follow Up"], ["Bluetron", "₹2,00,000", "393", "🟡 Monitor"]] },
+    visual: {
+      type: "hero-finance",
+      data: {
+        amount: "₹15,00,370",
+        amountLabel: "Outstanding",
+        days: "794",
+        daysLabel: "Days Overdue",
+        warning: true,
+      },
+    },
+    similar: {
+      title: "Similar Results",
+      headers: ["Customer", "Overdue", "Days Late", "Action"],
+      rows: [
+        ["M CHEMICALS", "₹15,00,370", "794", "🔴 Contact Now"],
+        ["LION COLOR", "₹16,96,780", "271", "🟠 Follow Up"],
+        ["Bluetron", "₹2,00,000", "393", "🟡 Monitor"],
+      ],
+    },
   },
   {
-    priority: "critical", filter: "Suppliers", category: "Supplier Payment",
+    priority: "critical",
+    filter: "Suppliers",
+    category: "Supplier Payment",
     dynamic: { url: REPORT_SP_URL, layout: "wide", wideKind: "supplier" },
     title: "Pay ₹4,62,560 — G IMPAX",
     problem: "Supplier payment is overdue.",
@@ -2209,11 +2288,30 @@ const AIR_REPORTS = [
     impact: "Delayed payment may affect future supply.",
     action: "Prioritize payment of ₹4,62,560 to G IMPAX.",
     buttons: ["Pay Now"],
-    visual: { type: "hero-finance", data: { amount: "₹4,62,560", amountLabel: "Payment Due", days: "306", daysLabel: "Days Late", tag: "Critical supplier" } },
-    similar: { title: "Similar Suppliers", headers: ["Supplier", "Overdue", "Days Late", "Importance", "Action"], rows: [["G IMPAX", "₹4,62,560", "306", "Critical", "🔴 Pay Now"], ["S N SALES", "₹3,315", "288", "High", "🟠 Pay Urgently"], ["VIVEK IND", "₹2,370", "321", "Medium", "🟡 Schedule"]] },
+    visual: {
+      type: "hero-finance",
+      data: {
+        amount: "₹4,62,560",
+        amountLabel: "Payment Due",
+        days: "306",
+        daysLabel: "Days Late",
+        tag: "Critical supplier",
+      },
+    },
+    similar: {
+      title: "Similar Suppliers",
+      headers: ["Supplier", "Overdue", "Days Late", "Importance", "Action"],
+      rows: [
+        ["G IMPAX", "₹4,62,560", "306", "Critical", "🔴 Pay Now"],
+        ["S N SALES", "₹3,315", "288", "High", "🟠 Pay Urgently"],
+        ["VIVEK IND", "₹2,370", "321", "Medium", "🟡 Schedule"],
+      ],
+    },
   },
   {
-    priority: "high", filter: "Inventory", category: "Inventory",
+    priority: "high",
+    filter: "Inventory",
+    category: "Inventory",
     dynamic: { url: REPORT_SM_URL, layout: "wide", wideKind: "product" },
     title: "Reduce Purchase — ABC Product",
     problem: "ABC Product is selling very slowly.",
@@ -2222,62 +2320,157 @@ const AIR_REPORTS = [
     action: "Reduce the next purchase to around 50–75 units.",
     buttons: ["Adjust Purchase"],
     visual: { type: "pv-bars", data: { purchase: 200, sales: 50 } },
-    similar: { title: "Similar Products", headers: ["Product", "Purchase / Month", "Sales / Month", "Excess", "Recommendation"], rows: [["ABC", 200, 50, 150, "Buy 50–75"], ["XYZ", 150, 40, 110, "Buy 40–60"], ["OPQ", 100, 55, 45, "Buy 55–70"]] },
+    similar: {
+      title: "Similar Products",
+      headers: [
+        "Product",
+        "Purchase / Month",
+        "Sales / Month",
+        "Excess",
+        "Recommendation",
+      ],
+      rows: [
+        ["ABC", 200, 50, 150, "Buy 50–75"],
+        ["XYZ", 150, 40, 110, "Buy 40–60"],
+        ["OPQ", 100, 55, 45, "Buy 55–70"],
+      ],
+    },
   },
   {
-    priority: "high", filter: "Suppliers", category: "Supplier Performance",
+    priority: "high",
+    filter: "Suppliers",
+    category: "Supplier Performance",
     title: "Find Alternative Supplier for Aadarsh Engineering",
     problem: "Aadarsh Engineering is frequently delaying deliveries.",
     why: "Average delivery time increased from 15 days to 20 days.",
     impact: "Production/selling may stop due to late material.",
-    action: "Start purchasing from or evaluating a reliable alternative supplier.",
+    action:
+      "Start purchasing from or evaluating a reliable alternative supplier.",
     buttons: ["Compare Suppliers"],
-    visual: { type: "delivery-change", data: { from: 15, to: 20, delta: "+5 days" } },
-    similar: { title: "Similar Suppliers", headers: ["Supplier", "Avg Delivery Time", "Change", "Recommendation"], rows: [["Aadarsh Engineering", "20 days", "+5 days", "🔴 Risk"], ["Aakar Sales & Services", "10 days", "0 days", "🟢 Best"]] },
+    visual: {
+      type: "delivery-change",
+      data: { from: 15, to: 20, delta: "+5 days" },
+    },
+    similar: {
+      title: "Similar Suppliers",
+      headers: ["Supplier", "Avg Delivery Time", "Change", "Recommendation"],
+      rows: [
+        ["Aadarsh Engineering", "20 days", "+5 days", "🔴 Risk"],
+        ["Aakar Sales & Services", "10 days", "0 days", "🟢 Best"],
+      ],
+    },
   },
   {
-    priority: "high", filter: "Suppliers", category: "Supplier Allocation",
+    priority: "high",
+    filter: "Suppliers",
+    category: "Supplier Allocation",
     title: "Shift Purchase Allocation",
-    problem: "One supplier is performing significantly worse than another supplier.",
+    problem:
+      "One supplier is performing significantly worse than another supplier.",
     why: "ABC delivers only 70% of orders on time, while XYZ delivers 95%.",
     impact: "Continued high allocation to ABC may increase delivery risk.",
     action: "Move more purchases from ABC to XYZ.",
     buttons: ["Review Allocation"],
-    visual: { type: "allocation", data: { current: [["ABC", 70], ["XYZ", 30]], recommended: [["ABC", 30], ["XYZ", 70]] } },
-    similar: { title: "Comparison", headers: ["Supplier", "On-Time Delivery", "Current Allocation", "Recommended Allocation"], rows: [["ABC", "70%", "70%", "30%"], ["XYZ", "95%", "30%", "70%"]] },
+    visual: {
+      type: "allocation",
+      data: {
+        current: [
+          ["ABC", 70],
+          ["XYZ", 30],
+        ],
+        recommended: [
+          ["ABC", 30],
+          ["XYZ", 70],
+        ],
+      },
+    },
+    similar: {
+      title: "Comparison",
+      headers: [
+        "Supplier",
+        "On-Time Delivery",
+        "Current Allocation",
+        "Recommended Allocation",
+      ],
+      rows: [
+        ["ABC", "70%", "70%", "30%"],
+        ["XYZ", "95%", "30%", "70%"],
+      ],
+    },
   },
   {
-    priority: "high", filter: "Inventory", category: "Inventory",
+    priority: "high",
+    filter: "Inventory",
+    category: "Inventory",
     title: "Purchase Earlier for Item P",
     problem: "Item P often reaches low stock before delivery.",
     why: "Supplier usually takes 25 days instead of the expected 15 days.",
     impact: "Higher chance of stock shortage.",
     action: "Place the order earlier to account for the actual delivery time.",
     buttons: ["Review Purchase Timing"],
-    visual: { type: "timeline-steps", data: { expected: 15, actual: 25, delta: 10 } },
+    visual: {
+      type: "timeline-steps",
+      data: { expected: 15, actual: 25, delta: 10 },
+    },
     similar: null,
   },
   {
-    priority: "critical", filter: "Finance", category: "Invoice Collection",
+    priority: "critical",
+    filter: "Finance",
+    category: "Invoice Collection",
     title: "Collect ₹30,870 — Shakti Enterprises",
     problem: "Invoice INV/02/25-26 is overdue.",
     why: "The invoice is overdue by 56 days.",
     impact: "₹30,870 has been blocked for 56 days.",
     action: "Follow up with Shakti Enterprises immediately.",
     buttons: ["Contact Customer", "View Invoice"],
-    visual: { type: "hero-finance", data: { amount: "₹30,870", amountLabel: "Invoice Amount", days: "56", daysLabel: "Days Overdue", warning: true } },
-    similar: { title: "Invoice Information", headers: ["Invoice", "Amount", "Overdue"], rows: [["INV/02/25-26", "₹30,870", "56 days"]] },
+    visual: {
+      type: "hero-finance",
+      data: {
+        amount: "₹30,870",
+        amountLabel: "Invoice Amount",
+        days: "56",
+        daysLabel: "Days Overdue",
+        warning: true,
+      },
+    },
+    similar: {
+      title: "Invoice Information",
+      headers: ["Invoice", "Amount", "Overdue"],
+      rows: [["INV/02/25-26", "₹30,870", "56 days"]],
+    },
   },
   {
-    priority: "critical", filter: "Customers", category: "Customer Collection",
+    priority: "critical",
+    filter: "Customers",
+    category: "Customer Collection",
     title: "High-Value Receivable — Immediate Attention",
-    problem: "A high-value customer payment remains unpaid for a very long period.",
+    problem:
+      "A high-value customer payment remains unpaid for a very long period.",
     why: "M CHEMICALS has ₹15,00,370 outstanding for 794 days.",
     impact: "A significant amount of cash is blocked.",
     action: "Give this customer the highest collection priority.",
     buttons: ["Contact Customer"],
-    visual: { type: "hero-finance", data: { name: "M CHEMICALS", amount: "₹15,00,370", amountLabel: "Outstanding", days: "794", daysLabel: "Days Overdue", warning: true } },
-    similar: { title: "Similar High-Value Receivables", headers: ["Customer", "Outstanding", "Days Late", "Priority"], rows: [["M CHEMICALS", "₹15.00L", "794", "🔴 Critical"], ["LION COLOR", "₹16.97L", "271", "🟠 High"], ["Bluetron", "₹2.00L", "393", "🟠 High"]] },
+    visual: {
+      type: "hero-finance",
+      data: {
+        name: "M CHEMICALS",
+        amount: "₹15,00,370",
+        amountLabel: "Outstanding",
+        days: "794",
+        daysLabel: "Days Overdue",
+        warning: true,
+      },
+    },
+    similar: {
+      title: "Similar High-Value Receivables",
+      headers: ["Customer", "Outstanding", "Days Late", "Priority"],
+      rows: [
+        ["M CHEMICALS", "₹15.00L", "794", "🔴 Critical"],
+        ["LION COLOR", "₹16.97L", "271", "🟠 High"],
+        ["Bluetron", "₹2.00L", "393", "🟠 High"],
+      ],
+    },
   },
 ];
 
@@ -2325,7 +2518,10 @@ function renderAirVisual(v) {
       const row = d.row || [];
       const fields = row
         .slice(1)
-        .map((v, i) => `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`)
+        .map(
+          (v, i) =>
+            `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`,
+        )
         .join("");
       return `<div class="air-viz air-record-strip">
         <span class="cc-name">${escapeHtml(String(row[0] || ""))}</span>
@@ -2360,9 +2556,17 @@ function renderAirVisual(v) {
       </div>`;
     }
     case "allocation": {
-      const block = (title, rows) => `<div class="air-alloc-block"><div class="air-alloc-title">${title}</div>${rows
-        .map(([name, pct]) => airBar(name, pct, name === "ABC" ? "bar-warn" : "bar-ok", pct + "%"))
-        .join("")}</div>`;
+      const block = (title, rows) =>
+        `<div class="air-alloc-block"><div class="air-alloc-title">${title}</div>${rows
+          .map(([name, pct]) =>
+            airBar(
+              name,
+              pct,
+              name === "ABC" ? "bar-warn" : "bar-ok",
+              pct + "%",
+            ),
+          )
+          .join("")}</div>`;
       return `<div class="air-viz air-alloc">
         ${block("Current Allocation", d.current)}
         ${block("Recommended Allocation", d.recommended)}
@@ -2384,7 +2588,10 @@ function renderAirSimilar(similar) {
   if (!similar) return "";
   const head = similar.headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
   const body = similar.rows
-    .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`)
+    .map(
+      (r) =>
+        `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`,
+    )
     .join("");
   return `<div class="air-similar">
       <div class="air-similar-title">${escapeHtml(similar.title)}</div>
@@ -2404,7 +2611,10 @@ function renderAirCarousel(similar, skipFirst) {
     .map((row, idx) => {
       const fields = row
         .slice(1)
-        .map((v, i) => `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`)
+        .map(
+          (v, i) =>
+            `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`,
+        )
         .join("");
       return `<div class="air-car-slide ${idx === 0 ? "active" : ""}" data-slide="${idx}">
           <span class="cc-name">${escapeHtml(String(row[0]))}</span>
@@ -2427,7 +2637,9 @@ function renderAirCard(r) {
       const cls = i === 0 ? "air-btn-primary" : "air-btn-ghost";
       const btn = `<button type="button" class="air-btn ${cls}">${escapeHtml(label)}</button>`;
       const hover = typeof b === "object" && b.hoverHtml ? b.hoverHtml : "";
-      return hover ? `<span class="air-hover">${btn}<div class="air-hover-pop">${hover}</div></span>` : btn;
+      return hover
+        ? `<span class="air-hover">${btn}<div class="air-hover-pop">${hover}</div></span>`
+        : btn;
     })
     .join("");
   // Why / Impact / Similar Result as toggle pebbles on the right. Their content
@@ -2439,10 +2651,15 @@ function renderAirCard(r) {
   (r.extraTabs || []).forEach((t) => tabs.push({ key: t.key, label: t.label }));
   if (r.similar) tabs.push({ key: "similar", label: "Similar Result" });
   const tabBtns = tabs
-    .map((t) => `<button type="button" class="air-tab" data-tab="${t.key}">${t.label}</button>`)
+    .map(
+      (t) =>
+        `<button type="button" class="air-tab" data-tab="${t.key}">${t.label}</button>`,
+    )
     .join("");
   const extraPanels = (r.extraTabs || [])
-    .map((t) => `<div class="air-tab-panel" data-panel="${t.key}">${t.html}</div>`)
+    .map(
+      (t) => `<div class="air-tab-panel" data-panel="${t.key}">${t.html}</div>`,
+    )
     .join("");
   const panels = `
     <div class="air-tab-panel" data-panel="why">${escapeHtml(r.why)}</div>
@@ -2462,7 +2679,14 @@ function renderAirCard(r) {
     </article>`;
 }
 
-const AIR_CATEGORIES = ["All", "Inventory", "Purchase", "Suppliers", "Customers", "Finance"];
+const AIR_CATEGORIES = [
+  "All",
+  "Inventory",
+  "Purchase",
+  "Suppliers",
+  "Customers",
+  "Finance",
+];
 const AIR_PRIORITIES = ["All", "Critical", "High", "Medium"];
 
 // The report "type" headings shown on the index screen (index-aligned with
@@ -2486,7 +2710,10 @@ const AIR_HEADINGS = [
 function renderReportsView() {
   const chips = (type, values) =>
     values
-      .map((v, i) => `<button type="button" class="air-chip ${i === 0 ? "active" : ""}" data-ftype="${type}" data-fval="${v}">${v}</button>`)
+      .map(
+        (v, i) =>
+          `<button type="button" class="air-chip ${i === 0 ? "active" : ""}" data-ftype="${type}" data-fval="${v}">${v}</button>`,
+      )
       .join("");
   const items = AIR_REPORTS.map((r, i) => {
     const pri = AIR_PRI[r.priority] || AIR_PRI.medium;
@@ -2516,8 +2743,8 @@ function renderReportsView() {
   return `
     <div class="air-view">
       <div class="air-filters">
-        <div class="air-filter-group" data-group="cat"><span class="air-filter-label">Category</span>${chips("cat", AIR_CATEGORIES)}</div>
-        <div class="air-filter-group" data-group="pri"><span class="air-filter-label">Priority</span>${chips("pri", AIR_PRIORITIES)}</div>
+        <div class="air-filter-group" data-group="cat"><span class="air-filter-label">Category:</span>${chips("cat", AIR_CATEGORIES)}</div>
+        <div class="air-filter-group" data-group="pri"><span class="air-filter-label">Priority:</span>${chips("pri", AIR_PRIORITIES)}</div>
       </div>
       <div class="air-accordion" id="airIndex">${items}</div>
       <div class="air-empty" id="airEmpty" style="display:none;">No reports match these filters.</div>
@@ -2527,10 +2754,12 @@ function renderReportsView() {
 // Open every report and render its card directly, so the dashboard shows the
 // cards up front instead of collapsed headings you have to click into.
 function expandAllReports() {
-  document.querySelectorAll("#airIndex .air-acc-item:not(.locked)").forEach((item) => {
-    item.classList.add("open");
-    fillReportCard(Number(item.dataset.reportIndex));
-  });
+  document
+    .querySelectorAll("#airIndex .air-acc-item:not(.locked)")
+    .forEach((item) => {
+      item.classList.add("open");
+      fillReportCard(Number(item.dataset.reportIndex));
+    });
 }
 
 // Fill an accordion slot with its card (static: render now; dynamic: fetch live).
@@ -2559,12 +2788,19 @@ function dynReportR(data, k) {
   const r = {
     why: c.why,
     impact: c.impact,
-    similar: { title: data.similar_title, headers: data.similar_headers, rows: others },
+    similar: {
+      title: data.similar_title,
+      headers: data.similar_headers,
+      rows: others,
+    },
   };
   if (data._mainStyle === "strip") {
     // No title line, no hero box — just the record shown horizontally.
     r.title = "";
-    r.visual = { type: "record-strip", data: { headers: data.similar_headers, row: c.row } };
+    r.visual = {
+      type: "record-strip",
+      data: { headers: data.similar_headers, row: c.row },
+    };
   } else if (data._mainStyle === "pv") {
     // Report 6: keep title, show purchase-vs-sales bars for this product.
     r.title = c.title;
@@ -2593,17 +2829,19 @@ function dynReportR(data, k) {
       o.due || "—",
       o.days > 0 ? `${o.days} days` : "—",
     ]);
-    r.extraTabs = [{
-      key: "outstanding",
-      label: "View Outstanding",
-      html: rows.length
-        ? renderAirSimilar({
-            title: `Outstanding — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`,
-            headers: ["Invoice", "Amount", "Due", "Days Late"],
-            rows,
-          })
-        : `<div class="air-empty">No open invoices.</div>`,
-    }];
+    r.extraTabs = [
+      {
+        key: "outstanding",
+        label: "View Outstanding",
+        html: rows.length
+          ? renderAirSimilar({
+              title: `Outstanding — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`,
+              headers: ["Invoice", "Amount", "Due", "Days Late"],
+              rows,
+            })
+          : `<div class="air-empty">No open invoices.</div>`,
+      },
+    ];
   } else if (data._buttonStyle === "supplier") {
     // No buttons; an "Invoices" tab firing a table of this supplier's invoices.
     r.buttons = [];
@@ -2613,26 +2851,33 @@ function dynReportR(data, k) {
       o.due || "—",
       o.days > 0 ? `${o.days} days` : "—",
     ]);
-    r.extraTabs = [{
-      key: "invoices",
-      label: "Invoices",
-      html: rows.length
-        ? renderAirSimilar({
-            title: `Invoices — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`,
-            headers: ["Invoice", "Amount", "Due", "Days Late"],
-            rows,
-          })
-        : `<div class="air-empty">No open invoices.</div>`,
-    }];
+    r.extraTabs = [
+      {
+        key: "invoices",
+        label: "Invoices",
+        html: rows.length
+          ? renderAirSimilar({
+              title: `Invoices — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`,
+              headers: ["Invoice", "Amount", "Due", "Days Late"],
+              rows,
+            })
+          : `<div class="air-empty">No open invoices.</div>`,
+      },
+    ];
   } else if (data._buttonStyle === "product") {
     // Product Detail button with a hover showing SKU, Warehouse and Amount.
     const lines = (c.detail || [])
-      .map(([k, v]) => `<div class="air-hover-line"><b>${escapeHtml(k)}:</b> ${escapeHtml(String(v))}</div>`)
+      .map(
+        ([k, v]) =>
+          `<div class="air-hover-line"><b>${escapeHtml(k)}:</b> ${escapeHtml(String(v))}</div>`,
+      )
       .join("");
-    r.buttons = [{
-      label: "Product Detail",
-      hoverHtml: `<div class="air-hover-title">${escapeHtml(c.name)}</div>${lines}`,
-    }];
+    r.buttons = [
+      {
+        label: "Product Detail",
+        hoverHtml: `<div class="air-hover-title">${escapeHtml(c.name)}</div>${lines}`,
+      },
+    ];
   } else if (data._buttonStyle === "none") {
     r.buttons = [];
   } else {
@@ -2665,12 +2910,17 @@ function renderWideHead(data, k) {
   const headers = data.similar_headers || [];
   const stripFields = c.row
     .slice(1)
-    .map((v, i) => `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`)
+    .map(
+      (v, i) =>
+        `<span class="cc-field"><span class="cc-label">${escapeHtml(headers[i + 1] || "")}</span><span class="cc-val">${escapeHtml(String(v))}</span></span>`,
+    )
     .join("");
-  const name = data._wideKind === "product" ? `Product: ${c.row[0]}` : String(c.row[0]);
-  const graph = data._wideKind === "product"
-    ? `<div class="air-hgraph">${renderAirVisual({ type: "pv-bars", data: c.pv })}</div>`
-    : "";
+  const name =
+    data._wideKind === "product" ? `Product: ${c.row[0]}` : String(c.row[0]);
+  const graph =
+    data._wideKind === "product"
+      ? `<div class="air-hgraph">${renderAirVisual({ type: "pv-bars", data: c.pv })}</div>`
+      : "";
   return `
       <div class="air-wstrip"><span class="cc-name">${escapeHtml(name)}</span>${stripFields}</div>
       ${graph}
@@ -2685,12 +2935,23 @@ function renderWideBody(data, k) {
   const c = data.cards[k];
   const headers = data.similar_headers || [];
   const others = data.cards.filter((_, i) => i !== k).map((cc) => cc.row);
-  const pill = (key, label) => `<button type="button" class="air-tab air-pill" data-tab="${key}">${label}<span class="air-caret">▾</span></button>`;
+  const pill = (key, label) =>
+    `<button type="button" class="air-tab air-pill" data-tab="${key}">${label}<span class="air-caret">▾</span></button>`;
 
-  const outRows = (c.outstanding || []).map((o) => [o.invoice_no, o.amount, o.due || "—", o.days > 0 ? `${o.days} days` : "—"]);
-  const invoiceTable = (label) => outRows.length
-    ? renderAirSimilar({ title: `${label} — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`, headers: ["Invoice", "Amount", "Due", "Days Late"], rows: outRows })
-    : `<div class="air-empty">No open invoices.</div>`;
+  const outRows = (c.outstanding || []).map((o) => [
+    o.invoice_no,
+    o.amount,
+    o.due || "—",
+    o.days > 0 ? `${o.days} days` : "—",
+  ]);
+  const invoiceTable = (label) =>
+    outRows.length
+      ? renderAirSimilar({
+          title: `${label} — ${c.name} (${c.invoice_count} invoice${c.invoice_count === 1 ? "" : "s"})`,
+          headers: ["Invoice", "Amount", "Due", "Days Late"],
+          rows: outRows,
+        })
+      : `<div class="air-empty">No open invoices.</div>`;
   const whyImpactPanel = `
       <div class="air-tab-panel" data-panel="whyimpact">
         <div class="air-block"><div class="air-block-label lbl-why">Why</div><div class="air-block-text">${escapeHtml(c.why)}</div></div>
@@ -2701,19 +2962,22 @@ function renderWideBody(data, k) {
   let pills, panels;
   if (data._wideKind === "product") {
     const detailLines = (c.detail || [])
-      .map(([kk, v]) => `<div class="air-hover-line"><b>${escapeHtml(kk)}:</b> ${escapeHtml(String(v))}</div>`)
+      .map(
+        ([kk, v]) =>
+          `<div class="air-hover-line"><b>${escapeHtml(kk)}:</b> ${escapeHtml(String(v))}</div>`,
+      )
       .join("");
-    pills = `<div class="air-pills">${pill("whyimpact", "Why Impact")}${pill("detail", "Product Detail")}${pill("similar", "Similar Result")}</div>`;
+    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("detail", "Product Detail")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="detail">${detailLines || '<div class="air-empty">No details.</div>'}</div>
       ${similarPanel}`;
   } else if (data._wideKind === "supplier") {
-    pills = `<div class="air-pills">${pill("whyimpact", "Why Impact")}${pill("invoices", "Invoices")}${pill("similar", "Similar Result")}</div>`;
+    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("invoices", "Invoices")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="invoices">${invoiceTable("Invoices")}</div>
       ${similarPanel}`;
   } else {
-    pills = `<div class="air-pills">${pill("contact", "📞 Contact")}${pill("whyimpact", "Why Impact")}${pill("outstanding", "View Outstanding")}${pill("similar", "Similar Result")}</div>`;
+    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("outstanding", "View Outstanding")}${pill("similar", "Similar Result")}${pill("contact", "📞 Contact")}</div>`;
     panels = `
       <div class="air-tab-panel" data-panel="contact">
         <div class="air-hover-line">📞 ${c.phone ? escapeHtml(c.phone) : "—"}</div>
@@ -2754,7 +3018,9 @@ async function loadDynamicReport(i, slot) {
     data._wideKind = cfg.wideKind || "customer";
     DYN_REPORT_DATA[i] = data;
     if (data._layout === "wide") {
-      const item = document.querySelector(`.air-acc-item[data-report-index="${i}"]`);
+      const item = document.querySelector(
+        `.air-acc-item[data-report-index="${i}"]`,
+      );
       if (item) item.dataset.dynIndex = "0";
       const head = document.getElementById(`wideHead-${i}`);
       if (head) head.innerHTML = renderWideHead(data, 0);
@@ -2771,8 +3037,12 @@ async function loadDynamicReport(i, slot) {
 function applyAirFilters() {
   const list = document.getElementById("airIndex");
   if (!list) return;
-  const catBtn = document.querySelector('.air-filter-group[data-group="cat"] .air-chip.active');
-  const priBtn = document.querySelector('.air-filter-group[data-group="pri"] .air-chip.active');
+  const catBtn = document.querySelector(
+    '.air-filter-group[data-group="cat"] .air-chip.active',
+  );
+  const priBtn = document.querySelector(
+    '.air-filter-group[data-group="pri"] .air-chip.active',
+  );
   const cat = catBtn ? catBtn.dataset.fval : "All";
   const pri = priBtn ? priBtn.dataset.fval.toLowerCase() : "all";
   let shown = 0;
@@ -2802,7 +3072,9 @@ if (reportsView) {
       const count = data.cards.length;
       const ri = Number(item.dataset.reportIndex);
       let k = Number(item.dataset.dynIndex || 0);
-      k = mainBtn.classList.contains("air-main-next") ? (k + 1) % count : (k - 1 + count) % count;
+      k = mainBtn.classList.contains("air-main-next")
+        ? (k + 1) % count
+        : (k - 1 + count) % count;
       item.dataset.dynIndex = k;
       if (data._layout === "wide") {
         const head = document.getElementById(`wideHead-${ri}`);
@@ -2813,7 +3085,9 @@ if (reportsView) {
         const dyn = item.querySelector(".air-dyn");
         if (dyn) {
           dyn.dataset.index = k;
-          dyn.querySelector(".air-dyn-card").innerHTML = renderAirCard(dynReportR(data, k));
+          dyn.querySelector(".air-dyn-card").innerHTML = renderAirCard(
+            dynReportR(data, k),
+          );
           const cur = dyn.querySelector(".air-main-cur");
           if (cur) cur.textContent = String(k + 1);
         }
@@ -2822,7 +3096,9 @@ if (reportsView) {
     }
     // Expand / collapse. Non-wide: the whole header button. Wide: only the title
     // wrap or chevron (so clicking the strip doesn't collapse the card).
-    const toggle = e.target.closest(".air-acc-header:not(.air-acc-header-wide), .air-acc-toggle");
+    const toggle = e.target.closest(
+      ".air-acc-header:not(.air-acc-header-wide), .air-acc-toggle",
+    );
     if (toggle) {
       const item = toggle.closest(".air-acc-item");
       if (item.classList.contains("locked")) return; // static cards are locked
@@ -2846,11 +3122,17 @@ if (reportsView) {
       const scope = tab.closest(".air-card, .air-acc-card");
       if (!scope) return;
       const wasActive = tab.classList.contains("active");
-      scope.querySelectorAll(".air-tab").forEach((t) => t.classList.remove("active"));
-      scope.querySelectorAll(".air-tab-panel").forEach((p) => p.classList.remove("active"));
+      scope
+        .querySelectorAll(".air-tab")
+        .forEach((t) => t.classList.remove("active"));
+      scope
+        .querySelectorAll(".air-tab-panel")
+        .forEach((p) => p.classList.remove("active"));
       if (!wasActive) {
         tab.classList.add("active");
-        const panel = scope.querySelector(`.air-tab-panel[data-panel="${tab.dataset.tab}"]`);
+        const panel = scope.querySelector(
+          `.air-tab-panel[data-panel="${tab.dataset.tab}"]`,
+        );
         if (panel) panel.classList.add("active");
       }
     }
@@ -2862,7 +3144,9 @@ function openReports() {
   currentLedger = null;
   document
     .querySelectorAll(".module")
-    .forEach((b) => b.classList.toggle("active", b.dataset.module === "reports"));
+    .forEach((b) =>
+      b.classList.toggle("active", b.dataset.module === "reports"),
+    );
   chatTitle.innerText = "My AI Report";
 
   // Dedicated dashboard rendered in its OWN container (not chatBody). Company
