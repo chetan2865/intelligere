@@ -75,6 +75,40 @@ def _parse_recpay_date(value):
     return None
 
 
+def _date_range_params(request):
+    """Optional (date_from, date_to) as date objects from ISO GET params
+    (`from`/`to`, as emitted by <input type="date">). Either may be None."""
+    return (
+        _parse_recpay_date(request.GET.get('from')),
+        _parse_recpay_date(request.GET.get('to')),
+    )
+
+
+def _date_range_scope(date_from, date_to):
+    """Human-readable ' from … to …' suffix for summary messages, or ''."""
+    if date_from and date_to:
+        return f" from {date_from.isoformat()} to {date_to.isoformat()}"
+    if date_from:
+        return f" from {date_from.isoformat()}"
+    if date_to:
+        return f" up to {date_to.isoformat()}"
+    return ''
+
+
+def _in_range(d, date_from, date_to):
+    """True if date d falls within [date_from, date_to] (open-ended either side).
+    A row with an unparseable/missing date is kept only when no bound is set."""
+    if date_from is None and date_to is None:
+        return True
+    if d is None:
+        return False
+    if date_from and d < date_from:
+        return False
+    if date_to and d > date_to:
+        return False
+    return True
+
+
 def _recpay_open_invoices(data, settled, partials):
     """Yield (party, invoice_dict, net_amount) for invoices not yet fully
     settled, netting off any partial payments — mirrors how the original
@@ -155,11 +189,13 @@ def _recpay_outstanding_rows(filter_key, party=None, company_id=None):
         week_start, week_end = _current_week_range(today)
         rows = [r for r in rows if r['_due_date_obj'] and week_start <= r['_due_date_obj'] <= week_end]
     elif filter_key == 'high_value':
-        rows = [r for r in rows if r['amount'] >= HIGH_VALUE_THRESHOLD]
+        # Highest-value first; the customer/supplier module filters by its own
+        # voucher type and keeps the top 2 client-side (they differ per module).
+        rows.sort(key=lambda r: r['amount'], reverse=True)
 
     if filter_key in ('customer', 'supplier'):
         rows.sort(key=lambda r: (r['date'] is None, r['date'] or ''), reverse=True)
-    else:
+    elif filter_key != 'high_value':
         rows.sort(key=lambda r: (r['due_date'] is None, r['due_date'] or ''))
 
     for r in rows:
@@ -229,11 +265,13 @@ def _bank_entry_lines(bank_entry_data):
                 yield (entry.get('ledger_name') or ''), entry
 
 
-def _recpay_bank_rows(mode, company_id=None):
+def _recpay_bank_rows(mode, company_id=None, date_from=None, date_to=None):
     """Per-party bank movement + remaining outstanding for the bank statement.
 
     mode 'payment' works off pay_data and Payment-vouchertype bank lines (debit);
     mode 'receipt' works off rec_data and Receipt-vouchertype bank lines (credit).
+    When a date range is given, bank lines are filtered by their entry `date`
+    and outstanding invoices by their `billdate`.
     """
     recpay = _company_recpay(company_id)
     if not recpay:
@@ -248,6 +286,8 @@ def _recpay_bank_rows(mode, company_id=None):
     bank_totals = defaultdict(float)
     for party, entry in _bank_entry_lines(recpay.bank_entry_data):
         if str(entry.get('vouchertype') or '').strip().lower() != want_vtype:
+            continue
+        if not _in_range(_parse_recpay_date(entry.get('date')), date_from, date_to):
             continue
         party = (party or '').strip()
         if not party:
@@ -265,7 +305,10 @@ def _recpay_bank_rows(mode, company_id=None):
         key = (party or '').strip()
         if not key:
             continue
-        data_totals[key] += sum(float(inv.get('amount') or 0) for inv in invoices)
+        data_totals[key] += sum(
+            float(inv.get('amount') or 0) for inv in invoices
+            if _in_range(_parse_recpay_date(inv.get('billdate')), date_from, date_to)
+        )
 
     # Only parties present in BOTH the outstanding data (pay_data/rec_data) and
     # the bank entries are shown — this drops pure bank/cash contra accounts
@@ -295,10 +338,12 @@ def bank_query_api(request):
             pk=company_id
         ).values_list('comp_name', flat=True).first()
 
-    rows = _recpay_bank_rows(mode, company_id=company_id)
+    date_from, date_to = _date_range_params(request)
+    rows = _recpay_bank_rows(mode, company_id=company_id, date_from=date_from, date_to=date_to)
 
     label = BANK_FILTER_LABELS[mode]
     scope = f" for **{company_name}**" if company_name else ''
+    scope += _date_range_scope(date_from, date_to)
     bank_total = sum(r['bank_amount'] for r in rows)
     remaining_total = sum(r['remaining'] for r in rows)
     bank_word = 'bank payment' if mode == 'payment' else 'bank receipts'
@@ -580,12 +625,21 @@ def ledger_transactions_api(request):
 ORDER_FILTER_LABELS = {
     'sales_orders': 'Sales Orders',
     'purchase_orders': 'Purchase Orders',
+    'open_orders': 'Pending Delivery',
+    'pending_dispatch': 'Pending Dispatch',
     'all': 'Orders',
 }
 
+# Which invoice doc_type each pebble reads.
+#  - Pending Delivery is derived from Purchase Orders (goods we've ordered and
+#    are still waiting on a supplier to deliver).
+#  - Pending Dispatch is derived from Sales Orders (goods a customer ordered
+#    that we still have to dispatch).
 ORDER_DOC_TYPES = {
     'sales_orders': 'Sales Order',
-    'purchase_orders': 'Purchase Invoice',
+    'purchase_orders': 'Purchase Order',
+    'open_orders': 'Purchase Order',
+    'pending_dispatch': 'Sales Order',
 }
 
 
@@ -597,12 +651,15 @@ def _order_party(invoice):
 
 
 def _serialize_invoice_order(invoice):
-    order_date = invoice.doc_date or invoice.Invoice_date
+    order_date = invoice.doc_date or invoice.Invoice_date or invoice.created_at.date()
+    # Days the order has been open — counted from its order (doc) date to today.
+    days_pending = max((date.today() - order_date).days, 0)
     return {
         'order_no': invoice.doc_no or invoice.Invoice_no or f'#{invoice.pk}',
         'order_type': 'Sales' if invoice.doc_type == 'Sales Order' else 'Purchase',
         'party': _order_party(invoice),
-        'order_date': order_date.isoformat() if order_date else invoice.created_at.date().isoformat(),
+        'order_date': order_date.isoformat(),
+        'days_pending': days_pending,
         'value': float(invoice.Total or 0),
     }
 
@@ -621,7 +678,10 @@ def order_query_api(request):
 
     company_id = request.GET.get('company_id') or None
 
-    doc_types = [ORDER_DOC_TYPES[filter_key]] if filter_key in ORDER_DOC_TYPES else list(ORDER_DOC_TYPES.values())
+    doc_types = (
+        [ORDER_DOC_TYPES[filter_key]] if filter_key in ORDER_DOC_TYPES
+        else sorted(set(ORDER_DOC_TYPES.values()))
+    )
     qs = Invoice.objects.filter(doc_type__in=doc_types)
     if company_id:
         # invoice_invoice has no company FK; the owning company's id is stored
@@ -632,13 +692,25 @@ def order_query_api(request):
     if ledger_name:
         rows = [r for r in rows if r['party'] == ledger_name]
 
-    rows.sort(key=lambda r: r['order_date'], reverse=True)
+    # Pending Delivery/Dispatch lead with the longest-waiting order; the plain
+    # order lists lead with the most recent.
+    is_pending = filter_key in ('open_orders', 'pending_dispatch')
+    if is_pending:
+        rows.sort(key=lambda r: r['days_pending'], reverse=True)
+    else:
+        rows.sort(key=lambda r: r['order_date'], reverse=True)
 
     label = ORDER_FILTER_LABELS[filter_key]
     scope = f" for **{ledger_name}**" if ledger_name else ''
     total = sum(r['value'] for r in rows)
     if not rows:
         message = f"No records found for **{label}**{scope}."
+    elif is_pending:
+        oldest = rows[0]['days_pending']
+        message = (
+            f"Here's **{label}**{scope} — {len(rows)} order(s) worth ₹{total:,.2f}, "
+            f"oldest pending {oldest} day(s)."
+        )
     else:
         message = f"Here's **{label}**{scope} — {len(rows)} order(s) totalling ₹{total:,.2f}."
 
@@ -676,7 +748,7 @@ INVOICE_TAX_LABELS = {'total_sales': 'Sales', 'total_purchase': 'Purchase'}
 INVOICE_TAX_DOC_TYPES = {'total_sales': 'Invoice', 'total_purchase': 'Purchase Invoice'}
 
 
-def _invoice_tax_rows(mode, company_id=None):
+def _invoice_tax_rows(mode, company_id=None, date_from=None, date_to=None):
     doc_type = INVOICE_TAX_DOC_TYPES[mode]
     # The counterparty is always in Buyer_data for both sales and purchase.
     party_field = 'Buyer_data'
@@ -684,6 +756,21 @@ def _invoice_tax_rows(mode, company_id=None):
     lines = InvoiceData.objects.filter(doc_type=doc_type)
     if company_id:
         lines = lines.filter(Invoice_data__Seller_data=str(company_id))
+
+    # Line items carry no date of their own; scope by the parent invoice's date
+    # (Invoice_date, falling back to doc_date when Invoice_date is unset).
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            rng['gte'] = date_from
+        if date_to:
+            rng['lte'] = date_to
+        inv_q = Q()
+        doc_q = Q(Invoice_data__Invoice_date__isnull=True)
+        for op, val in rng.items():
+            inv_q &= Q(**{f'Invoice_data__Invoice_date__{op}': val})
+            doc_q &= Q(**{f'Invoice_data__doc_date__{op}': val})
+        lines = lines.filter(inv_q | doc_q)
 
     def zero_or_null(field):
         return Q(**{field: 0}) | Q(**{field + '__isnull': True})
@@ -731,9 +818,11 @@ def invoice_tax_query_api(request):
             pk=company_id
         ).values_list('comp_name', flat=True).first()
 
-    rows = _invoice_tax_rows(mode, company_id=company_id)
+    date_from, date_to = _date_range_params(request)
+    rows = _invoice_tax_rows(mode, company_id=company_id, date_from=date_from, date_to=date_to)
     label = INVOICE_TAX_LABELS[mode]
     scope = f" for **{company_name}**" if company_name else ''
+    scope += _date_range_scope(date_from, date_to)
     totals = {
         'amount': sum(r['amount'] for r in rows),
         'cgst': sum(r['cgst'] for r in rows),
@@ -968,19 +1057,30 @@ def _expired_product_rows(company_name=None, company_id=None):
     expired = ExpiryProduct.objects.filter(deleted=False)
     if company_name:
         expired = expired.filter(company=company_name)
+    today = date.today()
     for exp in expired:
         other = exp.other_details if isinstance(exp.other_details, dict) else {}
         amount = other.get('Amount')
+        # Days since expiry (positive = already expired). None when no date.
+        days_expired = (today - exp.expiry_date).days if exp.expiry_date else None
         for sku in (exp.sku or [{}]):
+            # Quantity now rides in its own column, so drop it from the hover
+            # card to avoid showing it twice.
+            details = _sku_details(sku)
+            details.pop('Quantity', None)
             rows.append({
                 'item_name': exp.item_name,
                 'company': exp.company,
                 'sku_code': sku.get('sku_code', ''),
                 'expiry_date': exp.expiry_date.isoformat() if exp.expiry_date else None,
+                'days_expired': days_expired,
+                'quantity': _sku_qty(sku),
                 'amount': amount,
-                'details': _sku_details(sku),
+                'details': details,
                 'warehouses': _sku_warehouses(sku),
             })
+    # Always most-expired first (longest past its expiry date at the top).
+    rows.sort(key=lambda r: (r['days_expired'] is None, -(r['days_expired'] or 0)))
     return rows
 
 
@@ -1093,7 +1193,9 @@ def _low_stock_rows(company_name=None, company_id=None):
         for sku in (product.sku or []):
             for wh in (sku.get('warehouse') or []):
                 qty = _to_number(wh.get('qty'))
-                if qty is None or qty > min_qty:
+                # Skip empty/negative allocations — a zero or below is out of
+                # stock (covered by Negative Stock), not "running low".
+                if qty is None or qty <= 0 or qty > min_qty:
                     continue
                 rows.append({
                     'warehouse_name': wh.get('name') or 'Unassigned',
@@ -1155,6 +1257,29 @@ def inventory_query_api(request):
 
     rows = INVENTORY_ROW_BUILDERS[filter_key](company_name=company_name, company_id=company_id)
 
+    # Dead Stock: the deadStock day-count is a single per-company setting, so it
+    # is surfaced once (in the summary line) rather than repeated on every row.
+    # It also supports a warehouse-wise filter — the full warehouse list is
+    # collected before filtering so the dropdown always offers every warehouse.
+    dead_meta = {}
+    if filter_key == 'dead_stock':
+        warehouse = request.GET.get('warehouse') or None
+        wh_names = sorted({
+            (wh.get('name') or 'Unassigned')
+            for r in rows for wh in (r.get('warehouses') or [])
+        })
+        thresholds = {r['deadstock_days'] for r in rows if r.get('deadstock_days') is not None}
+        dead_meta = {
+            'warehouses': wh_names,
+            'deadstock_days': next(iter(thresholds)) if len(thresholds) == 1 else None,
+        }
+        if warehouse:
+            rows = [
+                r for r in rows
+                if any((wh.get('name') or 'Unassigned') == warehouse
+                       for wh in (r.get('warehouses') or []))
+            ]
+
     if not rows:
         message = f"No records found for **{label}**{scope}."
     elif filter_key in ('fast_moving', 'slow_moving'):
@@ -1167,6 +1292,8 @@ def inventory_query_api(request):
         )
     else:
         message = f"Here's **{label}**{scope} — {len(rows)} item(s)."
+        if filter_key == 'dead_stock' and dead_meta.get('deadstock_days') is not None:
+            message += f" · dead-stock threshold {dead_meta['deadstock_days']} days"
 
     return JsonResponse({
         'filter': filter_key,
@@ -1175,6 +1302,7 @@ def inventory_query_api(request):
         'message': message,
         'count': len(rows),
         'rows': rows,
+        **dead_meta,
     })
 
 

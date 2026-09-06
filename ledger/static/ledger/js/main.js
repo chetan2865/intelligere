@@ -339,7 +339,7 @@ const EXPORT_DOC_STYLES = `
     text-align: right;
   }
 
-  .export-btn, .msg-actions, .page-size-label, .date-filter-controls, .table-count, .table-controls, .sku-hover-card, select, button {
+  .export-btn, .msg-actions, .page-size-label, .date-filter-controls, .module-filter-bar, .table-count, .table-controls, .sku-hover-card, select, button {
     display: none;
   }
 
@@ -694,7 +694,31 @@ function renderInvoiceRowsDynamic(
     .join("");
 }
 
+// Days-since-order badge for the pending views — hotter colour the longer it
+// has waited.
+function pendingDaysBadge(days) {
+  const d = Number(days) || 0;
+  const cls = d >= 30 ? "pend-hot" : d >= 14 ? "pend-warm" : "pend-cool";
+  return `<span class="pend-badge ${cls}">${d} day${d === 1 ? "" : "s"}</span>`;
+}
+
+// Days-since-expiry badge for Inventory > Expired Product. Positive = already
+// expired (redder the longer ago); negative = expiry still ahead.
+function fmtExpiredDays(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const d = Number(value);
+  if (Number.isNaN(d)) return "—";
+  if (d < 0) {
+    const n = Math.abs(d);
+    return `<span class="pend-badge pend-cool">in ${n} day${n === 1 ? "" : "s"}</span>`;
+  }
+  const cls = d >= 30 ? "pend-hot" : d >= 7 ? "pend-warm" : "pend-cool";
+  return `<span class="pend-badge ${cls}">${d} day${d === 1 ? "" : "s"}</span>`;
+}
+
 function renderOrderRows(orders, filterKey, hasPartyData) {
+  const showDays =
+    filterKey === "open_orders" || filterKey === "pending_dispatch";
   return orders
     .map((o) => {
       const tds = [`<td>${escapeHtml(o.order_no)}</td>`];
@@ -703,6 +727,9 @@ function renderOrderRows(orders, filterKey, hasPartyData) {
       }
       tds.push(`<td>${escapeHtml(o.order_type)}</td>`);
       tds.push(`<td>${escapeHtml(o.order_date)}</td>`);
+      if (showDays) {
+        tds.push(`<td>${pendingDaysBadge(o.days_pending)}</td>`);
+      }
       tds.push(`<td>${fmtMoney(o.value)}</td>`);
       return `<tr>${tds.join("")}</tr>`;
     })
@@ -896,7 +923,13 @@ function refreshTable(tableId) {
       entry.rangePreset === "custom" ? "flex" : "none";
 }
 
-function buildPaginatedTable(rows, renderRowFn, theadHtml, dateField = null) {
+function buildPaginatedTable(
+  rows,
+  renderRowFn,
+  theadHtml,
+  dateField = null,
+  initialSort = null,
+) {
   if (!rows.length) return "";
 
   const tableId = `tbl-${tableSeq++}`;
@@ -909,8 +942,9 @@ function buildPaginatedTable(rows, renderRowFn, theadHtml, dateField = null) {
     rangePreset: "custom",
     fromDate: "",
     toDate: "",
-    sortColumn: null,
-    sortColumnDir: "asc",
+    // Optional starting column sort (e.g. days_pending desc for pending views).
+    sortColumn: initialSort ? initialSort.column : null,
+    sortColumnDir: initialSort ? initialSort.dir : "asc",
   };
 
   const entry = tableStore[tableId];
@@ -1016,10 +1050,14 @@ function buildInvoiceTable(invoices, filterKey) {
   );
 }
 function buildOrderTable(orders, filterKey) {
+  // Pending Delivery reads purchase orders; Pending Dispatch reads sales orders.
+  const isPending =
+    filterKey === "open_orders" || filterKey === "pending_dispatch";
+
   let firstColHeader = "Order #";
-  if (filterKey === "sales_orders") {
+  if (filterKey === "sales_orders" || filterKey === "pending_dispatch") {
     firstColHeader = "SO No.";
-  } else if (filterKey === "purchase_orders") {
+  } else if (filterKey === "purchase_orders" || filterKey === "open_orders") {
     firstColHeader = "PO No.";
   } else if (orders && orders.length > 0) {
     const firstType = orders[0].order_type;
@@ -1040,6 +1078,13 @@ function buildOrderTable(orders, filterKey) {
   }
   ths.push(`<th>Type</th>`);
   ths.push(`<th>Order Date</th>`);
+  if (isPending) {
+    const daysHeader =
+      filterKey === "open_orders" ? "Delivery Pending" : "Dispatch Pending";
+    ths.push(
+      `<th data-sort-col="days_pending" style="cursor:pointer;user-select:none;">${daysHeader} <span class="sort-icon">↕</span></th>`,
+    );
+  }
   ths.push(
     `<th data-sort-col="value" style="cursor:pointer;user-select:none;">Value <span class="sort-icon">↕</span></th>`,
   );
@@ -1051,6 +1096,7 @@ function buildOrderTable(orders, filterKey) {
     (rows) => renderOrderRows(rows, filterKey, hasPartyData),
     theadHtml,
     "order_date",
+    isPending ? { column: "days_pending", dir: "desc" } : null,
   );
 }
 
@@ -1143,17 +1189,14 @@ const INVENTORY_TABLE_CONFIG = {
     "item_name",
     "Item name",
     [
-      ["Company", "company"],
       ["Created At", "created_at"],
       ["Age (days)", "age_days"],
-      ["Dead Stock (days)", "deadstock_days"],
     ],
   ],
   negative_stock: [
     "item_name",
     "Item name",
     [
-      ["Company", "company"],
       ["Warehouse", "warehouse_name"],
       ["Qty", "qty"],
     ],
@@ -1173,7 +1216,6 @@ const INVENTORY_TABLE_CONFIG = {
     "Warehouse",
     [
       ["Item", "item_name"],
-      ["Company", "company"],
       ["Qty", "qty"],
       ["Minimum Qty", "min_qty"],
       ["Short By", "shortfall"],
@@ -1183,8 +1225,9 @@ const INVENTORY_TABLE_CONFIG = {
     "item_name",
     "Item name",
     [
-      ["Company", "company"],
       ["Expiry Date", "expiry_date"],
+      ["Qty", "quantity"],
+      ["Days Expired", "days_expired", fmtExpiredDays],
       ["Amount", "amount", fmtAmount],
     ],
   ],
@@ -1192,7 +1235,6 @@ const INVENTORY_TABLE_CONFIG = {
     "item_name",
     "Item name",
     [
-      ["Company", "company"],
       ["Qty", "qty"],
       ["Maximum Qty", "max_qty"],
       ["Excess", "excess"],
@@ -1332,11 +1374,11 @@ function buildOutstandingSidePebbles(resetLabel, allCompaniesPhrase) {
   };
 }
 const CUSTOMER_OUTSTANDING_PEBBLES = buildOutstandingSidePebbles(
-  "All Customers",
+  "Back",
   "all\\s+customers",
 );
 const SUPPLIER_OUTSTANDING_PEBBLES = buildOutstandingSidePebbles(
-  "All Suppliers",
+  "Back",
   "all\\s+suppliers",
 );
 
@@ -1353,7 +1395,6 @@ const ORDER_DYNAMIC_PEBBLES = [
   { key: "purchase_orders", label: "Purchase Orders" },
   { key: "open_orders", label: "Pending Delivery" },
   { key: "pending_dispatch", label: "Pending Dispatch" },
-  { key: "info", label: "Ledger Summary" },
   { key: "reset", label: "All Companies" },
 ];
 
@@ -1596,7 +1637,6 @@ const MODULES = {
     rowsField: "orders",
     buildTable: buildOrderTable,
     dedicatedActions: { info: runLedgerInfo },
-    comingSoon: new Set(["open_orders", "pending_dispatch"]),
     companyScoped: true,
   },
   inventory: {
@@ -1624,6 +1664,7 @@ const MODULES = {
     buildTable: buildBankTable,
     dedicatedActions: {},
     companyScoped: true,
+    dateFilter: true,
   },
   invoices: {
     label: "Invoices",
@@ -1637,6 +1678,7 @@ const MODULES = {
     buildTable: buildInvoiceTaxTable,
     dedicatedActions: {},
     companyScoped: true,
+    dateFilter: true,
   },
 };
 
@@ -1644,6 +1686,15 @@ const MODULES = {
 let currentLedger = null;
 // Which module's chat context is active. Null initially until user selects a tab.
 let currentModuleKey = null;
+// Custom date range for modules with `dateFilter` (Bank Statement, Invoices).
+// Empty strings mean "no bound"; ISO yyyy-mm-dd from <input type="date">.
+let currentDateRange = { from: "", to: "" };
+// Last filter run in the active module, so re-applying a date range repeats it.
+let lastModuleFilterKey = null;
+// Dead Stock warehouse-wise filter: selected warehouse ("" = all) and the full
+// list of warehouses offered in the dropdown (from the last dead-stock query).
+let currentWarehouse = "";
+let deadStockWarehouses = [];
 
 // ---------------------------------------------------------------------------
 // Company (tenant) selector — every module is scoped to exactly one
@@ -1761,6 +1812,80 @@ function showCurrentPebbles() {
   renderPebbleDock(currentPebbleSet(), handlePebbleClick);
 }
 
+// Filter bar rendered INSIDE the result card (above the table) for the current
+// filter — a custom date range for Bank Statement/Invoices, and a warehouse
+// selector for Inventory > Dead Stock. Returns "" when nothing applies.
+function buildModuleFilterBar(filterKey) {
+  const module = MODULES[currentModuleKey];
+  let html = "";
+
+  if (module.dateFilter) {
+    const active = currentDateRange.from || currentDateRange.to;
+    html += `
+      <div class="module-filter-bar${active ? " active" : ""}" data-mf="date">
+        <span class="mf-label">📅 Custom date</span>
+        <input type="date" class="mf-input mf-from" value="${currentDateRange.from}" aria-label="From date">
+        <span class="mf-sep">→</span>
+        <input type="date" class="mf-input mf-to" value="${currentDateRange.to}" aria-label="To date">
+        <button type="button" class="mf-btn mf-apply">Apply</button>
+        ${active ? '<button type="button" class="mf-btn mf-ghost mf-clear">Clear</button>' : ""}
+      </div>`;
+  }
+
+  if (
+    currentModuleKey === "inventory" &&
+    filterKey === "dead_stock" &&
+    deadStockWarehouses.length
+  ) {
+    const opts = ['<option value="">All warehouses</option>']
+      .concat(
+        deadStockWarehouses.map(
+          (w) =>
+            `<option value="${escapeHtml(w)}" ${w === currentWarehouse ? "selected" : ""}>${escapeHtml(w)}</option>`,
+        ),
+      )
+      .join("");
+    html += `
+      <div class="module-filter-bar${currentWarehouse ? " active" : ""}" data-mf="warehouse">
+        <span class="mf-label">🏬 Warehouse</span>
+        <select class="mf-input mf-warehouse" aria-label="Warehouse">${opts}</select>
+      </div>`;
+  }
+
+  return html;
+}
+
+// Delegated handlers for the in-card filter bars (bars live in dynamically
+// added bubbles, so we listen on chatBody rather than binding each one).
+chatBody.addEventListener("click", (e) => {
+  const bar = e.target.closest('.module-filter-bar[data-mf="date"]');
+  if (!bar) return;
+  const module = MODULES[currentModuleKey];
+  if (e.target.classList.contains("mf-apply")) {
+    const from = bar.querySelector(".mf-from").value;
+    const to = bar.querySelector(".mf-to").value;
+    if (from && to && from > to) {
+      appendBotMessage("The <b>From</b> date can't be after the <b>To</b> date.");
+      return;
+    }
+    if (!from && !to) {
+      appendBotMessage("Pick a <b>From</b> and/or <b>To</b> date first.");
+      return;
+    }
+    currentDateRange = { from, to };
+    runModuleQuery(lastModuleFilterKey || module.staticPebbles[0].key);
+  } else if (e.target.classList.contains("mf-clear")) {
+    currentDateRange = { from: "", to: "" };
+    runModuleQuery(lastModuleFilterKey || module.staticPebbles[0].key);
+  }
+});
+
+chatBody.addEventListener("change", (e) => {
+  if (!e.target.classList.contains("mf-warehouse")) return;
+  currentWarehouse = e.target.value;
+  runModuleQuery("dead_stock");
+});
+
 const PEBBLE_USAGE_STORAGE_KEY = "ledger-pebble-usage";
 const MAX_MOST_USED = 10;
 
@@ -1868,14 +1993,31 @@ async function fetchModuleResult(filterKey, ledgerId) {
   if (ledgerId && module.idParam) params.set(module.idParam, ledgerId);
   if (module.companyScoped && currentCompanyId)
     params.set("company_id", currentCompanyId);
+  if (module.dateFilter) {
+    if (currentDateRange.from) params.set("from", currentDateRange.from);
+    if (currentDateRange.to) params.set("to", currentDateRange.to);
+  }
+  // Dead Stock warehouse-wise filter.
+  if (currentModuleKey === "inventory" && filterKey === "dead_stock" && currentWarehouse) {
+    params.set("warehouse", currentWarehouse);
+  }
 
   const res = await fetch(`${module.queryUrl}?${params.toString()}`);
   const data = await res.json();
   let rows = data[module.rowsField];
   let message = data.message;
 
+  // Remember the warehouses this company's dead stock spans, for the dropdown.
+  if (currentModuleKey === "inventory" && filterKey === "dead_stock") {
+    deadStockWarehouses = data.warehouses || [];
+  }
+
   if (module.voucherType && filterKey !== module.baseFilterKey) {
     rows = rows.filter((r) => r.type === module.voucherType);
+    // High Value = this module's own top 2 outstanding by amount.
+    if (filterKey === "high_value") {
+      rows = rows.slice().sort((a, b) => b.amount - a.amount).slice(0, 2);
+    }
     const total = rows.reduce((sum, r) => sum + r.amount, 0);
     const label =
       module.dynamicPebbles.find((p) => p.key === filterKey)?.label ||
@@ -1890,6 +2032,7 @@ async function fetchModuleResult(filterKey, ledgerId) {
 
 async function runModuleQuery(filterKey) {
   const module = MODULES[currentModuleKey];
+  lastModuleFilterKey = filterKey;
 
   if (module.comingSoon === true) {
     appendBotMessage(`🚧 <b>${escapeHtml(module.label)}</b> is coming soon.`);
@@ -1929,6 +2072,7 @@ async function runModuleQuery(filterKey) {
       appendBotMessage("").querySelector(".bubble"),
       `
       ${renderMarkdownLite(applyLabelOverrides(message))}
+      ${buildModuleFilterBar(filterKey)}
       ${module.buildTable(rows, filterKey)}
     `,
       rows.length > 0,
@@ -3168,6 +3312,10 @@ function openReports() {
 function openModule(moduleKey, isInitial) {
   currentModuleKey = moduleKey;
   currentLedger = null;
+  currentDateRange = { from: "", to: "" };
+  lastModuleFilterKey = null;
+  currentWarehouse = "";
+  deadStockWarehouses = [];
   // Leaving the Reports dashboard — restore the chat view + composer.
   if (reportsView) reportsView.style.display = "none";
   chatBody.style.display = "";

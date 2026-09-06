@@ -451,6 +451,96 @@ body {
   border-color: var(--accent-1);
   transform: translateY(-2px);
 }
+/* days-pending badge for Order Book (Pending Delivery / Pending Dispatch) */
+.pend-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pend-badge.pend-cool {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+.pend-badge.pend-warm {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
+.pend-badge.pend-hot {
+  background: rgba(220, 38, 38, 0.14);
+  color: #dc2626;
+}
+/* in-card filter bar — custom date range (Bank Statement, Invoices) and the
+   warehouse selector (Inventory > Dead Stock). Sits above the table inside the
+   result card. */
+.module-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 4px 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+.module-filter-bar.active {
+  border-color: var(--accent-1);
+  background: var(--accent-tint);
+}
+.mf-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary, #666);
+}
+.module-filter-bar.active .mf-label {
+  color: var(--accent-1);
+}
+.mf-sep {
+  color: var(--text-secondary, #888);
+}
+.mf-input {
+  border: 1px solid var(--border-color);
+  background: var(--bg-body, #fff);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.mf-input:focus {
+  outline: none;
+  border-color: var(--accent-1);
+}
+.mf-btn {
+  border: 1px solid var(--accent-1);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--accent-1);
+  color: #fff;
+}
+.mf-btn:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+.mf-btn.mf-ghost {
+  background: transparent;
+  color: var(--accent-1);
+}
+.mf-btn.mf-ghost:hover {
+  background: var(--accent-tint);
+  filter: none;
+}
+/* the interactive filter bar has no place in an exported PDF */
+.export-doc .module-filter-bar {
+  display: none;
+}
 /* results card embedded in a bot bubble */
 .result-card {
   overflow-x: auto;
