@@ -2484,6 +2484,7 @@ const AIR_REPORTS = [
     priority: "high",
     filter: "Suppliers",
     category: "Supplier Performance",
+    dynamic: { url: REPORT_VD_URL, layout: "wide", wideKind: "delivery" },
     title: "Find Alternative Supplier for Aadarsh Engineering",
     problem: "Aadarsh Engineering is frequently delaying deliveries.",
     why: "Average delivery time increased from 15 days to 20 days.",
@@ -2562,6 +2563,7 @@ const AIR_REPORTS = [
     priority: "critical",
     filter: "Finance",
     category: "Invoice Collection",
+    dynamic: { url: REPORT_IC_URL, layout: "wide", wideKind: "invoice" },
     title: "Collect ₹30,870 — Shakti Enterprises",
     problem: "Invoice INV/02/25-26 is overdue.",
     why: "The invoice is overdue by 56 days.",
@@ -3122,6 +3124,32 @@ function renderWideBody(data, k) {
     pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("invoices", "Invoices")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="invoices">${invoiceTable("Invoices")}</div>
+      ${similarPanel}`;
+  } else if (data._wideKind === "delivery") {
+    // Each delivery time = challan received minus the order date before it.
+    const delRows = (c.deliveries || []).map((d, i) => [
+      `Delivery ${i + 1}`,
+      `${d} days`,
+    ]);
+    const deliveriesPanel = delRows.length
+      ? renderAirSimilar({
+          title: `Delivery Times — ${c.name} (${c.delivery_count} received, avg ${c.avg_days} days)`,
+          headers: ["Delivery", "Days Taken"],
+          rows: delRows,
+        })
+      : `<div class="air-empty">No matched deliveries.</div>`;
+    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("deliveries", "Deliveries")}${pill("similar", "Similar Result")}</div>`;
+    panels = `${whyImpactPanel}
+      <div class="air-tab-panel" data-panel="deliveries">${deliveriesPanel}</div>
+      ${similarPanel}`;
+  } else if (data._wideKind === "invoice") {
+    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("contact", "📞 Contact")}${pill("similar", "Similar Result")}</div>`;
+    panels = `${whyImpactPanel}
+      <div class="air-tab-panel" data-panel="contact">
+        <div class="air-hover-line">👤 ${c.customer ? escapeHtml(c.customer) : "—"}</div>
+        <div class="air-hover-line">📞 ${c.phone ? escapeHtml(c.phone) : "—"}</div>
+        <div class="air-hover-line">✉ ${c.email ? escapeHtml(c.email) : "—"}</div>
+      </div>
       ${similarPanel}`;
   } else {
     pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("outstanding", "View Outstanding")}${pill("similar", "Similar Result")}${pill("contact", "📞 Contact")}</div>`;

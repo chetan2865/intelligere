@@ -1621,6 +1621,208 @@ def report_slow_moving_api(request):
     })
 
 
+# ---------------------------------------------------------------------------
+# Report 7 — Find Alternative Supplier (vendor delivery performance).
+#
+# Delivery performance is measured off invoice.Invoice: the goods we ORDER are
+# "Outbound Purchase Order" docs; the goods we RECEIVE are "Inbound Challan"
+# docs. For each receipt (challan) we take the most recent order to the same
+# supplier on/before it, and delivery_time = challan_date − order_date. On these
+# docs Seller_data is the owning company id and the trade party (the supplier)
+# is Buyer_data_name. Per supplier we report the average delivery time and the
+# trend (how much slower recent deliveries are than earlier ones); the fastest
+# supplier is flagged as the best alternative.
+# ---------------------------------------------------------------------------
+
+VENDOR_DELIVERY_ORDER_TYPE = 'Outbound Purchase Order'
+VENDOR_DELIVERY_RECEIPT_TYPE = 'Inbound Challan'
+# A supplier's delivery counts as "increasing" once recent deliveries run this
+# many days slower than earlier ones.
+DELIVERY_RISK_INCREASE_DAYS = 7
+
+
+def _delivery_party(invoice):
+    return ((invoice.response_json or {}).get('Buyer_data_name') or '').strip()
+
+
+def report_vendor_delivery_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    def dates_by_supplier(doc_type):
+        qs = Invoice.objects.filter(doc_type=doc_type)
+        if company_id:
+            qs = qs.filter(Seller_data=str(company_id))
+        out = defaultdict(list)
+        for inv in qs:
+            party = _delivery_party(inv)
+            d = inv.doc_date or inv.Invoice_date
+            if party and d:
+                out[party].append(d)
+        return out
+
+    orders = dates_by_supplier(VENDOR_DELIVERY_ORDER_TYPE)
+    receipts = dates_by_supplier(VENDOR_DELIVERY_RECEIPT_TYPE)
+
+    suppliers = {}
+    for party in set(orders) & set(receipts):
+        order_dates = sorted(orders[party])
+        # One delivery time per receipt: challan date minus the most recent
+        # order to this supplier on/before that challan.
+        times = []
+        for challan in sorted(receipts[party]):
+            prior = [o for o in order_dates if o <= challan]
+            if prior:
+                days = (challan - prior[-1]).days
+                if days >= 0:
+                    times.append(days)
+        if not times:
+            continue
+        avg = round(sum(times) / len(times))
+        half = len(times) // 2 or 1
+        baseline = round(sum(times[:half]) / len(times[:half]))
+        later = times[half:]
+        recent = round(sum(later) / len(later)) if later else baseline
+        increase = max(recent - baseline, 0)
+        suppliers[party] = {
+            'avg': avg, 'baseline': baseline, 'recent': recent,
+            'increase': increase, 'count': len(times), 'times': times,
+        }
+
+    if not suppliers:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    # The fastest supplier (lowest average, then smallest increase) is the best
+    # alternative to steer purchases toward.
+    best_party = min(suppliers, key=lambda p: (suppliers[p]['avg'], suppliers[p]['increase']))
+
+    def recommendation(party, s):
+        if party == best_party:
+            return '🟢 Best'
+        if s['increase'] >= DELIVERY_RISK_INCREASE_DAYS:
+            return '🔴 Risk'
+        return '🟡 Good'
+
+    # Cards lead with the slowest supplier — the one most in need of an
+    # alternative — then the next slowest, and so on.
+    ranked = sorted(suppliers.items(), key=lambda kv: (kv[1]['avg'], kv[1]['increase']), reverse=True)
+
+    cards = []
+    for party, s in ranked[:5]:
+        if s['increase'] > 0:
+            why = (f"Supplier {party} is frequently delaying deliveries. "
+                   f"Delivery time has increased from {s['baseline']} to {s['recent']} days.")
+        else:
+            why = f"Supplier {party} takes about {s['avg']} days to deliver, on average."
+        cards.append({
+            'name': party,
+            'title': f"Find Alternative Supplier for {party}",
+            'why': why,
+            'impact': 'Production/selling may stop due to late material.',
+            'action': f"Start purchasing from a reliable alternative of {party}.",
+            'deliveries': s['times'],
+            'delivery_count': s['count'],
+            'avg_days': s['avg'],
+            'row': [
+                party,
+                f"{s['avg']} days",
+                f"+{s['increase']} days" if s['increase'] else "0 days",
+                recommendation(party, s),
+            ],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Compare Suppliers'],
+        'similar_title': 'Similar Result',
+        'similar_headers': ['Supplier', 'Avg Delivery Time', 'Increasing Lead Time', 'Recommendation'],
+        'cards': cards,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Report 10 — Immediate Invoice Collection (most overdue receivables).
+#
+# Live from recPay.rec_data (customer receivables, netted of received /
+# partial_received). Unlike report 4, which groups by customer and ranks by
+# amount, this one works INVOICE by invoice and ranks by how long each has been
+# overdue (today − duedate), surfacing the single oldest-overdue invoices to
+# chase first.
+# ---------------------------------------------------------------------------
+
+def report_immediate_collection_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    recpay = _company_recpay(company_id)
+    if not recpay:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    today = timezone.localdate()
+    overdue = []  # one entry per open, overdue receivable invoice
+    for party, inv, amount in _recpay_open_invoices(
+        recpay.rec_data, recpay.received, recpay.partial_received
+    ):
+        due = _parse_recpay_date(inv.get('duedate'))
+        if not due or due >= today:
+            continue  # only invoices already past their due date
+        overdue.append({
+            'party': party,
+            'invoice_no': inv.get('invoice_no') or '—',
+            'amount': amount,
+            'due': due,
+            'days': (today - due).days,
+        })
+
+    if not overdue:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    # Longest overdue first — those are the ones to chase immediately.
+    overdue.sort(key=lambda x: x['days'], reverse=True)
+
+    # Phone/email per customer for the Contact panel.
+    contacts = {}
+    if recpay.company_id:
+        for name, phone, email in ladgernamedata.objects.filter(
+            company_id=recpay.company_id, is_deleted=False
+        ).values_list('ledeger_name', 'ledeger_phone', 'ledeger_email'):
+            if name:
+                contacts[name.strip()] = {'phone': phone or '', 'email': email or ''}
+
+    cards = []
+    for x in overdue[:5]:
+        amt = _inr(x['amount'])
+        info = contacts.get((x['party'] or '').strip(), {})
+        cards.append({
+            'name': x['invoice_no'],
+            'customer': x['party'],
+            'title': f"Follow up with {x['party']} immediately.",
+            'why': f"Invoice {x['invoice_no']} is overdue by {x['days']} days.",
+            'impact': f"{amt} has been blocked for {x['days']} days.",
+            'phone': info.get('phone', ''),
+            'email': info.get('email', ''),
+            'row': [x['invoice_no'], x['party'], amt, f"{x['days']} days", '🔴 Contact Now'],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Contact Now'],
+        'similar_title': 'Similar Result',
+        'similar_headers': ['Invoice', 'Customer', 'Amount', 'Overdue', 'Action'],
+        'cards': cards,
+    })
+
+
 OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 

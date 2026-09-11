@@ -20,5 +20,7 @@ urlpatterns = [
     path('api/report/customer-collection/', views.report_customer_collection_api, name='report_customer_collection_api'),
     path('api/report/supplier-payment/', views.report_supplier_payment_api, name='report_supplier_payment_api'),
     path('api/report/slow-moving/', views.report_slow_moving_api, name='report_slow_moving_api'),
+    path('api/report/vendor-delivery/', views.report_vendor_delivery_api, name='report_vendor_delivery_api'),
+    path('api/report/immediate-collection/', views.report_immediate_collection_api, name='report_immediate_collection_api'),
     path('api/export-pdf/', views.export_pdf_api, name='export_pdf_api'),
 ]
