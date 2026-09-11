@@ -2365,6 +2365,7 @@ const AIR_REPORTS = [
     priority: "good",
     filter: "Inventory",
     category: "Inventory Transfer",
+    dynamic: { url: REPORT_ST_URL, layout: "wide", wideKind: "stock_transfer" },
     title: "Use Existing Stock Instead of Purchasing",
     problem: "The company is planning to purchase Item Y.",
     why: "Another warehouse already has 400 extra units.",
@@ -2590,6 +2591,7 @@ const AIR_REPORTS = [
     priority: "critical",
     filter: "Customers",
     category: "Customer Collection",
+    dynamic: { url: REPORT_HV_URL, layout: "wide", wideKind: "customer" },
     title: "High-Value Receivable — Immediate Attention",
     problem:
       "A high-value customer payment remains unpaid for a very long period.",
@@ -3141,6 +3143,27 @@ function renderWideBody(data, k) {
     pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("deliveries", "Deliveries")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="deliveries">${deliveriesPanel}</div>
+      ${similarPanel}`;
+  } else if (data._wideKind === "stock_transfer") {
+    const whHeaders = data.warehouse_headers || [
+      "Warehouse",
+      "Stock",
+      "Requirement",
+      "Excess/Shortage",
+    ];
+    const whTable = (c.warehouses || []).length
+      ? renderAirSimilar({
+          title: `Warehouse Breakdown — ${c.name}`,
+          headers: whHeaders,
+          rows: c.warehouses,
+        })
+      : `<div class="air-empty">No warehouse stock.</div>`;
+    const actionLine = c.action
+      ? `<div class="air-block air-wi-full"><div class="air-block-label lbl-action">Action</div><div class="air-block-text">${escapeHtml(c.action)}</div></div>`
+      : "";
+    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("warehouses", "Warehouses")}${pill("similar", "Other Products")}</div>`;
+    panels = `${whyImpactPanel}
+      <div class="air-tab-panel" data-panel="warehouses">${whTable}${actionLine}</div>
       ${similarPanel}`;
   } else if (data._wideKind === "invoice") {
     pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("contact", "📞 Contact")}${pill("similar", "Similar Result")}</div>`;

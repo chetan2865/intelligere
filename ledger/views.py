@@ -1823,6 +1823,253 @@ def report_immediate_collection_api(request):
     })
 
 
+# ---------------------------------------------------------------------------
+# Report 11 — High-Value Overdue Receivable (party-wise).
+#
+# Live from recPay.rec_data. Unlike report 10 (one row per overdue invoice),
+# this groups every open receivable by customer and picks the ones worth
+# chasing first by blending TWO things: how much they owe (value) and how long
+# it has sat unpaid. The overdue figure is amount-weighted — an amount-weighted
+# mean of each invoice's overdue days — so a big old invoice pulls it up more
+# than a small one. The priority score weights value 60% and overdue 40%
+# (the "60% up = high value" rule), and the risk tier is read off that score.
+# ---------------------------------------------------------------------------
+
+HIGH_VALUE_VALUE_WEIGHT = 0.6   # value counts for 60% of the priority score
+HIGH_VALUE_OVERDUE_WEIGHT = 0.4  # weighted overdue days for the remaining 40%
+
+
+def report_high_value_overdue_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    recpay = _company_recpay(company_id)
+    if not recpay:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    today = timezone.localdate()
+    agg = {}      # party -> {'outstanding', 'weighted_days_num', 'max_days'}
+    details = {}  # party -> list of open invoices
+    for party, inv, amount in _recpay_open_invoices(
+        recpay.rec_data, recpay.received, recpay.partial_received
+    ):
+        due = _parse_recpay_date(inv.get('duedate'))
+        days_late = (today - due).days if due and due < today else 0
+        e = agg.setdefault(party, {'outstanding': 0.0, 'weighted_days_num': 0.0, 'max_days': 0})
+        e['outstanding'] += amount
+        e['weighted_days_num'] += amount * days_late  # numerator of amount-weighted overdue
+        e['max_days'] = max(e['max_days'], days_late)
+        details.setdefault(party, []).append({
+            'invoice_no': inv.get('invoice_no') or '—',
+            'amount': amount,
+            'due': due.isoformat() if due else '',
+            'days': days_late,
+        })
+
+    # Amount-weighted overdue days per party; keep only parties that are overdue.
+    parties = []
+    for party, e in agg.items():
+        weighted = round(e['weighted_days_num'] / e['outstanding']) if e['outstanding'] else 0
+        if weighted <= 0:
+            continue
+        parties.append((party, e['outstanding'], weighted))
+
+    if not parties:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    max_value = max(p[1] for p in parties) or 1.0
+    max_overdue = max(p[2] for p in parties) or 1
+
+    def score(value, overdue):
+        return (HIGH_VALUE_VALUE_WEIGHT * (value / max_value)
+                + HIGH_VALUE_OVERDUE_WEIGHT * (overdue / max_overdue))
+
+    def risk(s):
+        if s >= 0.66:
+            return '🔴 Critical'
+        if s >= 0.33:
+            return '🟠 High'
+        return '🟡 Medium'
+
+    parties.sort(key=lambda p: score(p[1], p[2]), reverse=True)
+
+    # Phone/email per customer for the Contact panel.
+    contacts = {}
+    if recpay.company_id:
+        for name, phone, email in ladgernamedata.objects.filter(
+            company_id=recpay.company_id, is_deleted=False
+        ).values_list('ledeger_name', 'ledeger_phone', 'ledeger_email'):
+            if name:
+                contacts[name.strip()] = {'phone': phone or '', 'email': email or ''}
+
+    cards = []
+    for party, value, overdue in parties[:5]:
+        amt = _inr(value)
+        info = contacts.get((party or '').strip(), {})
+        invoices = sorted(details.get(party, []), key=lambda x: x['amount'], reverse=True)[:5]
+        outstanding = [{
+            'invoice_no': x['invoice_no'],
+            'amount': _inr(x['amount']),
+            'due': x['due'],
+            'days': x['days'],
+        } for x in invoices]
+        cards.append({
+            'name': party,
+            'title': f"Focus collection efforts on {party} first.",
+            'why': f"{party} is high-value overdue by {overdue} days.",
+            'impact': 'A large amount of your cash is blocked.',
+            'phone': info.get('phone', ''),
+            'email': info.get('email', ''),
+            'invoice_count': len(details.get(party, [])),
+            'outstanding': outstanding,
+            'row': [party, amt, f"{overdue} days", risk(score(value, overdue))],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Contact Customer', 'View Outstanding'],
+        'similar_title': 'Similar Result',
+        'similar_headers': ['Customer', 'Outstanding', 'Overdue', 'Risk'],
+        'cards': cards,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Report 3 — Use Excess Stock First (inter-warehouse transfer).
+#
+# The requirement for a product ("Required Stock") is its total open Sales Order
+# quantity (invoice.InvoiceData, doc_type 'Sales Order'). Sales-order lines carry
+# no warehouse, so the requirement is booked against the product's MAIN warehouse
+# (the sku warehouse flagged is_main, else the fullest one). Current stock per
+# warehouse comes from Product.sku[].warehouse[].qty. When the main warehouse
+# falls short but OTHER warehouses hold that product, we recommend transferring
+# the surplus in first ("use excess stock first") and only buying whatever the
+# transfer can't cover — Shortage = Required − Current; transfer up to the excess
+# available elsewhere, purchase the remainder.
+# ---------------------------------------------------------------------------
+
+def _fmt_units(v):
+    """Whole-ish unit count without a trailing '.0' (e.g. 200, 12.5)."""
+    return f'{v:g}'
+
+
+def report_stock_transfer_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    # Requirement per product = total open Sales Order quantity (company scoped
+    # by the parent invoice's Seller_data, which holds the company id).
+    req = {}
+    so = InvoiceData.objects.filter(doc_type='Sales Order')
+    if company_id:
+        so = so.filter(Invoice_data__Seller_data=str(company_id))
+    for name, qty in so.values_list('Products', 'quantity'):
+        key = (name or '').strip()
+        if key:
+            req[key] = req.get(key, 0.0) + (_to_number(qty) or 0.0)
+
+    if not req:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    # Per-warehouse stock per product (Product stores the company by name).
+    products = Product.objects.filter(deleted=False)
+    if company_name:
+        products = products.filter(company=company_name)
+
+    items = []
+    for product in products:
+        name = (product.item_name or '').strip()
+        requirement = req.get(name, 0.0)
+        if requirement <= 0:
+            continue
+        wh_stock = defaultdict(float)
+        mains = set()
+        for sku in (product.sku or []):
+            if not isinstance(sku, dict):
+                continue
+            for wh in (sku.get('warehouse') or []):
+                if not isinstance(wh, dict):
+                    continue
+                wname = wh.get('name') or 'Unassigned'
+                wh_stock[wname] += _to_number(wh.get('qty')) or 0.0
+                if wh.get('is_main'):
+                    mains.add(wname)
+        if len(wh_stock) < 2:
+            continue  # nothing to transfer between
+
+        # Demand sits at the main warehouse (flagged, else the fullest one).
+        main = (max(mains, key=lambda n: wh_stock.get(n, 0.0)) if mains
+                else max(wh_stock, key=lambda n: wh_stock[n]))
+        main_shortage = max(requirement - wh_stock[main], 0.0)
+        others = {n: v for n, v in wh_stock.items() if n != main and v > 0}
+        other_excess = sum(others.values())
+        if main_shortage <= 0 or other_excess <= 0:
+            continue  # main already covered, or no surplus elsewhere to move
+
+        source = max(others, key=lambda n: others[n])
+        transferable = min(other_excess, main_shortage)
+        remaining = max(main_shortage - other_excess, 0.0)
+        items.append({
+            'name': name, 'requirement': requirement, 'main': main,
+            'main_stock': wh_stock[main], 'shortage': main_shortage,
+            'other_excess': other_excess, 'source': source,
+            'transferable': transferable, 'remaining': remaining,
+            'wh_stock': dict(wh_stock),
+        })
+
+    if not items:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    # Biggest transfer opportunity first.
+    items.sort(key=lambda x: x['transferable'], reverse=True)
+
+    cards = []
+    for m in items[:5]:
+        warehouses = []
+        for n in sorted(m['wh_stock'], key=lambda n: m['wh_stock'][n], reverse=True):
+            stock = m['wh_stock'][n]
+            requirement = m['requirement'] if n == m['main'] else 0.0
+            gap = stock - requirement
+            warehouses.append([
+                n, _fmt_units(stock), _fmt_units(requirement),
+                ('+' if gap >= 0 else '') + _fmt_units(gap),
+            ])
+        if m['remaining'] > 0:
+            action = (f"Transfer {_fmt_units(m['transferable'])} units from {m['source']} "
+                      f"to {m['main']}, then purchase the remaining {_fmt_units(m['remaining'])} units.")
+        else:
+            action = (f"Transfer {_fmt_units(m['transferable'])} units from {m['source']} "
+                      f"to {m['main']} — no purchase needed.")
+        cards.append({
+            'name': m['name'],
+            'title': f"Use existing stock for {m['name']} first.",
+            'why': f"{_fmt_units(m['other_excess'])} extra units are already available in {m['source']}.",
+            'impact': 'New purchases will unnecessarily block money.',
+            'action': action,
+            'warehouses': warehouses,
+            'row': [m['name'], f"{_fmt_units(m['requirement'])} units", f"{_fmt_units(m['transferable'])} units"],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Transfer Stock'],
+        'similar_title': 'Similar Result',
+        'similar_headers': ['Product', 'Requirement', 'Transferable'],
+        'warehouse_headers': ['Warehouse', 'Stock', 'Requirement', 'Excess/Shortage'],
+        'cards': cards,
+    })
+
+
 OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 

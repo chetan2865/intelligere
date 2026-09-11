@@ -22,5 +22,7 @@ urlpatterns = [
     path('api/report/slow-moving/', views.report_slow_moving_api, name='report_slow_moving_api'),
     path('api/report/vendor-delivery/', views.report_vendor_delivery_api, name='report_vendor_delivery_api'),
     path('api/report/immediate-collection/', views.report_immediate_collection_api, name='report_immediate_collection_api'),
+    path('api/report/high-value-overdue/', views.report_high_value_overdue_api, name='report_high_value_overdue_api'),
+    path('api/report/stock-transfer/', views.report_stock_transfer_api, name='report_stock_transfer_api'),
     path('api/export-pdf/', views.export_pdf_api, name='export_pdf_api'),
 ]
