@@ -2219,12 +2219,12 @@ tr.clickable-row:hover td {
   position: fixed;
   z-index: 9999;
   flex-direction: column;
-  background: var(--bg-card, #1a2236);
-  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   border-radius: 10px;
   overflow: hidden;
   min-width: 160px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
 }
 .air-pills-drop.open .air-pills-menu {
   display: flex;
@@ -2315,11 +2315,11 @@ tr.clickable-row:hover td {
 .air-hover-preview {
   position: fixed;
   z-index: 9999;
-  background: var(--bg-card, #1a2236);
-  border: 1px solid var(--border-color, rgba(255,255,255,0.13));
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 14px 18px;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.18);
   opacity: 0;
   visibility: hidden;
   transform: translateY(4px);
