@@ -2127,7 +2127,7 @@ async function showCompanyOverview(ledgerId, ledgerName, filterKey = null) {
     withExportButton(
       appendBotMessage("").querySelector(".bubble"),
       `
-      ${renderMarkdownLite(`Here's the **Complete Ledger** for **${data.name}**.`)}
+      ${renderMarkdownLite(`Here's the **Info** for **${data.name}**.`)}
       ${buildLedgerInfoCard(data)}
     `,
       true,
@@ -2230,10 +2230,6 @@ async function searchCompanies(text, filterKey = null) {
 
     if (data.count === 1) {
       const match = data.matches[0];
-      const intro = filterKey
-        ? `Found <b>${escapeHtml(match.name)}</b>. Here's <b>${escapeHtml(pebbleLabels[filterKey] || filterKey)}</b>.`
-        : `Found <b>${escapeHtml(match.name)}</b>. Here's their ledger and details.`;
-      appendBotMessage(intro);
       enterCompanyContext(match.id, match.name, filterKey);
       return;
     }
@@ -3309,18 +3305,27 @@ if (reportsView) {
       }
       return;
     }
-    // Expand / collapse. Non-wide: the whole header button. Wide: only the title
-    // wrap or chevron (so clicking the strip doesn't collapse the card).
+    // Expand / collapse. Non-wide: the whole header button. Wide: the whole
+    // header area except interactive elements (Prev/Next, Options, tabs).
     const toggle = e.target.closest(
       ".air-acc-header:not(.air-acc-header-wide), .air-acc-toggle",
     );
-    if (toggle) {
-      const item = toggle.closest(".air-acc-item");
+    const wideHeader = !toggle && e.target.closest(".air-acc-header-wide");
+    const isExcluded = wideHeader && e.target.closest(
+      ".air-main-prev, .air-main-next, .air-pills-toggle, .air-pills-menu, .air-tab, .air-btn",
+    );
+    if (toggle || (wideHeader && !isExcluded)) {
+      const item = (toggle || wideHeader).closest(".air-acc-item");
       if (item.classList.contains("locked")) return; // static cards are locked
       const idx = Number(item.dataset.reportIndex);
       const opening = !item.classList.contains("open");
       item.classList.toggle("open");
-      if (opening) fillReportCard(idx);
+      if (opening) {
+        fillReportCard(idx);
+        airHoverCard.classList.remove("visible");
+        hoverItem = null;
+        clearTimeout(hoverTimer);
+      }
       return;
     }
     const chip = e.target.closest(".air-chip");
@@ -3353,7 +3358,7 @@ if (reportsView) {
     if (tab) {
       const drop = tab.closest(".air-pills-drop");
       if (drop) drop.classList.remove("open");
-      const scope = tab.closest(".air-card, .air-acc-card");
+      const scope = tab.closest(".air-card, .air-acc-card, .air-acc-item");
       if (!scope) return;
       const wasActive = tab.classList.contains("active");
       scope
@@ -3450,6 +3455,7 @@ if (reportsView) {
 
     hoverTimer = setTimeout(async () => {
       if (hoverItem !== item) return;
+      if (item.classList.contains("open")) return;
       const ri = Number(item.dataset.reportIndex);
       const report = AIR_REPORTS[ri];
       const k = Number(item.dataset.dynIndex || 0);
