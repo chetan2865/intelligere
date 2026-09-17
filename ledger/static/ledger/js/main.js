@@ -101,6 +101,11 @@ if (window.ResizeObserver) {
 }
 window.addEventListener("resize", updateInputWrapperHeight);
 document.addEventListener("DOMContentLoaded", updateInputWrapperHeight);
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".air-pills-drop")) {
+    document.querySelectorAll(".air-pills-drop.open").forEach((d) => d.classList.remove("open"));
+  }
+});
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
@@ -1767,7 +1772,6 @@ function switchCompany(companyId) {
     if (reportsView) {
       reportsView.innerHTML = renderReportsView();
       reportsView.scrollTop = 0;
-      expandAllReports();
     }
     return;
   }
@@ -2362,7 +2366,7 @@ const AIR_REPORTS = [
     },
   },
   {
-    priority: "good",
+    priority: "medium",
     filter: "Inventory",
     category: "Inventory Transfer",
     dynamic: { url: REPORT_ST_URL, layout: "wide", wideKind: "stock_transfer" },
@@ -2879,6 +2883,7 @@ function renderReportsView() {
       ? `<div class="air-acc-header air-acc-header-wide">
           <span class="air-acc-toggle air-acc-titlewrap">${titleInner}</span>
           <div class="air-wide-live" id="wideHead-${i}"></div>
+          <span class="air-wide-options" id="wideOptions-${i}"></span>
           <span class="air-acc-toggle air-idx-chevron">▾</span>
         </div>`
       : `<button type="button" class="air-acc-header">${titleInner}<span class="air-idx-chevron">${locked ? "🔒" : "▾"}</span></button>`;
@@ -3052,6 +3057,26 @@ function renderDynReport(data) {
 // Report 4 "wide" layout is split: the company strip + Prev/Next render INTO the
 // accordion header (same row as the title); the pills + panels + Contact button
 // render in the body.
+function renderWidePills(data) {
+  const pill = (key, label) =>
+    `<button type="button" class="air-tab air-pill" data-tab="${key}">${label}</button>`;
+  let items;
+  if (data._wideKind === "product") {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("detail", "Product Detail")}${pill("similar", "Similar Result")}`;
+  } else if (data._wideKind === "supplier") {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("invoices", "Invoices")}${pill("similar", "Similar Result")}`;
+  } else if (data._wideKind === "delivery") {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("deliveries", "Deliveries")}${pill("similar", "Similar Result")}`;
+  } else if (data._wideKind === "stock_transfer") {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("warehouses", "Warehouses")}${pill("similar", "Other Products")}`;
+  } else if (data._wideKind === "invoice") {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("contact", "📞 Contact")}${pill("similar", "Similar Result")}`;
+  } else {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("outstanding", "View Outstanding")}${pill("similar", "Similar Result")}${pill("contact", "📞 Contact")}`;
+  }
+  return `<div class="air-pills-drop"><button type="button" class="air-btn air-btn-ghost air-pills-toggle">Options <span class="air-caret">▾</span></button><div class="air-pills-menu">${items}</div></div>`;
+}
+
 function renderWideHead(data, k) {
   const c = data.cards[k];
   const count = data.cards.length;
@@ -3070,12 +3095,10 @@ function renderWideHead(data, k) {
       ? `<div class="air-hgraph">${renderAirVisual({ type: "pv-bars", data: c.pv })}</div>`
       : "";
   return `
-      <div class="air-wstrip"><span class="cc-name">${escapeHtml(name)}</span>${stripFields}</div>
+      <div class="air-wstrip"><button type="button" class="air-btn air-btn-ghost air-main-prev">‹ Prev</button><span class="cc-name">${escapeHtml(name)}</span>${stripFields}<button type="button" class="air-btn air-btn-ghost air-main-next">Next ›</button></div>
       ${graph}
       <div class="air-wnav">
-        <button type="button" class="air-btn air-btn-ghost air-main-prev">‹ Prev</button>
-        <span class="air-main-pos"><b class="air-main-cur">${k + 1}</b> / ${count} companies</span>
-        <button type="button" class="air-btn air-btn-ghost air-main-next">Next ›</button>
+        <span class="air-main-pos" style="display:none"><b class="air-main-cur">${k + 1}</b> / ${count} companies</span>
       </div>`;
 }
 
@@ -3083,9 +3106,6 @@ function renderWideBody(data, k) {
   const c = data.cards[k];
   const headers = data.similar_headers || [];
   const others = data.cards.filter((_, i) => i !== k).map((cc) => cc.row);
-  const pill = (key, label) =>
-    `<button type="button" class="air-tab air-pill" data-tab="${key}">${label}<span class="air-caret">▾</span></button>`;
-
   const outRows = (c.outstanding || []).map((o) => [
     o.invoice_no,
     o.amount,
@@ -3110,7 +3130,7 @@ function renderWideBody(data, k) {
       </div>`;
   const similarPanel = `<div class="air-tab-panel" data-panel="similar">${renderAirSimilar({ title: data.similar_title, headers, rows: others })}</div>`;
 
-  let pills, panels;
+  let panels;
   if (data._wideKind === "product") {
     const detailLines = (c.detail || [])
       .map(
@@ -3118,12 +3138,10 @@ function renderWideBody(data, k) {
           `<div class="air-hover-line"><b>${escapeHtml(kk)}:</b> ${escapeHtml(String(v))}</div>`,
       )
       .join("");
-    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("detail", "Product Detail")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="detail">${detailLines || '<div class="air-empty">No details.</div>'}</div>
       ${similarPanel}`;
   } else if (data._wideKind === "supplier") {
-    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("invoices", "Invoices")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="invoices">${invoiceTable("Invoices")}</div>
       ${similarPanel}`;
@@ -3140,7 +3158,6 @@ function renderWideBody(data, k) {
           rows: delRows,
         })
       : `<div class="air-empty">No matched deliveries.</div>`;
-    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("deliveries", "Deliveries")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="deliveries">${deliveriesPanel}</div>
       ${similarPanel}`;
@@ -3161,12 +3178,10 @@ function renderWideBody(data, k) {
     const actionLine = c.action
       ? `<div class="air-block air-wi-full"><div class="air-block-label lbl-action">Action</div><div class="air-block-text">${escapeHtml(c.action)}</div></div>`
       : "";
-    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("warehouses", "Warehouses")}${pill("similar", "Other Products")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="warehouses">${whTable}${actionLine}</div>
       ${similarPanel}`;
   } else if (data._wideKind === "invoice") {
-    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("contact", "📞 Contact")}${pill("similar", "Similar Result")}</div>`;
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="contact">
         <div class="air-hover-line">👤 ${c.customer ? escapeHtml(c.customer) : "—"}</div>
@@ -3175,7 +3190,6 @@ function renderWideBody(data, k) {
       </div>
       ${similarPanel}`;
   } else {
-    pills = `<div class="air-pills">${pill("whyimpact", "Why & Impact")}${pill("outstanding", "View Outstanding")}${pill("similar", "Similar Result")}${pill("contact", "📞 Contact")}</div>`;
     panels = `
       <div class="air-tab-panel" data-panel="contact">
         <div class="air-hover-line">📞 ${c.phone ? escapeHtml(c.phone) : "—"}</div>
@@ -3186,7 +3200,6 @@ function renderWideBody(data, k) {
       ${similarPanel}`;
   }
   return `
-      ${pills}
       <div class="air-tab-content">${panels}</div>
     `;
 }
@@ -3222,6 +3235,8 @@ async function loadDynamicReport(i, slot) {
       if (item) item.dataset.dynIndex = "0";
       const head = document.getElementById(`wideHead-${i}`);
       if (head) head.innerHTML = renderWideHead(data, 0);
+      const opts = document.getElementById(`wideOptions-${i}`);
+      if (opts) opts.innerHTML = renderWidePills(data);
       slot.innerHTML = renderWideBody(data, 0);
     } else {
       slot.innerHTML = renderDynReport(data);
@@ -3278,6 +3293,8 @@ if (reportsView) {
         const head = document.getElementById(`wideHead-${ri}`);
         const body = document.getElementById(`accCard-${ri}`);
         if (head) head.innerHTML = renderWideHead(data, k);
+        const wopts = document.getElementById(`wideOptions-${ri}`);
+        if (wopts) wopts.innerHTML = renderWidePills(data);
         if (body) body.innerHTML = renderWideBody(data, k);
       } else {
         const dyn = item.querySelector(".air-dyn");
@@ -3315,8 +3332,27 @@ if (reportsView) {
       applyAirFilters();
       return;
     }
+    const pillsToggle = e.target.closest(".air-pills-toggle");
+    if (pillsToggle) {
+      const drop = pillsToggle.closest(".air-pills-drop");
+      if (drop) {
+        document.querySelectorAll(".air-pills-drop.open").forEach((d) => {
+          if (d !== drop) d.classList.remove("open");
+        });
+        const isOpen = drop.classList.toggle("open");
+        if (isOpen) {
+          const menu = drop.querySelector(".air-pills-menu");
+          const rect = pillsToggle.getBoundingClientRect();
+          menu.style.top = (rect.bottom + 6) + "px";
+          menu.style.left = rect.left + "px";
+        }
+      }
+      return;
+    }
     const tab = e.target.closest(".air-tab");
     if (tab) {
+      const drop = tab.closest(".air-pills-drop");
+      if (drop) drop.classList.remove("open");
       const scope = tab.closest(".air-card, .air-acc-card");
       if (!scope) return;
       const wasActive = tab.classList.contains("active");
@@ -3333,6 +3369,130 @@ if (reportsView) {
         );
         if (panel) panel.classList.add("active");
       }
+    }
+  });
+
+  // Hover preview card for closed accordion items
+  // Hover preview — silently pre-fetches data and shows full details
+  const airHoverCard = document.createElement("div");
+  airHoverCard.className = "air-hover-preview";
+  document.body.appendChild(airHoverCard);
+  let hoverTimer = null;
+  let hoverItem = null;
+  const _hoverFetching = {};
+
+  function _prefetchForHover(i) {
+    if (DYN_REPORT_DATA[i]) return Promise.resolve(DYN_REPORT_DATA[i]);
+    if (_hoverFetching[i]) return _hoverFetching[i];
+    const cfg = (AIR_REPORTS[i] && AIR_REPORTS[i].dynamic) || {};
+    if (!cfg.url) return Promise.resolve(null);
+    _hoverFetching[i] = (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (currentCompanyId) params.set("company_id", currentCompanyId);
+        const res = await fetch(`${cfg.url}?${params.toString()}`);
+        const data = await res.json();
+        if (!data.found || !data.cards || !data.cards.length) return null;
+        data._mainStyle = cfg.mainStyle || "hero";
+        data._buttonStyle = cfg.buttonStyle || "default";
+        data._layout = cfg.layout || "";
+        data._wideKind = cfg.wideKind || "customer";
+        DYN_REPORT_DATA[i] = data;
+        return data;
+      } catch { return null; }
+    })();
+    return _hoverFetching[i];
+  }
+
+  function _buildHoverHtml(report, data, k) {
+    let html = `<div class="air-hprev-title">${escapeHtml(report?.title || "")}</div>`;
+    if (!data || !data.cards || !data.cards.length) {
+      html += `<div class="air-hprev-loading">Loading details…</div>`;
+      return html;
+    }
+    const card = data.cards[k] || data.cards[0];
+    const headers = data.similar_headers || [];
+    html += `<div class="air-hprev-name">${escapeHtml(String(card.row[0]))}</div>`;
+    if (card.row.length > 1) {
+      html += `<div class="air-hprev-fields">`;
+      card.row.slice(1).forEach((v, idx) => {
+        const label = headers[idx + 1] || "";
+        html += `<div class="air-hprev-field"><span class="air-hprev-label">${escapeHtml(label)}</span><span class="air-hprev-val">${escapeHtml(String(v))}</span></div>`;
+      });
+      html += `</div>`;
+    }
+    if (card.why || card.impact) {
+      html += `<div class="air-hprev-wi">`;
+      if (card.why) html += `<div class="air-hprev-section"><span class="air-hprev-section-label">Why</span><span class="air-hprev-section-text">${escapeHtml(card.why)}</span></div>`;
+      if (card.impact) html += `<div class="air-hprev-section"><span class="air-hprev-section-label">Impact</span><span class="air-hprev-section-text">${escapeHtml(card.impact)}</span></div>`;
+      html += `</div>`;
+    }
+    if (data.cards.length > 1) {
+      html += `<div class="air-hprev-more">+${data.cards.length - 1} more — click to expand</div>`;
+    }
+    return html;
+  }
+
+  function _positionHover(item) {
+    const rect = item.getBoundingClientRect();
+    airHoverCard.style.top = (rect.bottom + 6) + "px";
+    airHoverCard.style.left = rect.left + "px";
+    airHoverCard.style.maxWidth = rect.width + "px";
+  }
+
+  reportsView.addEventListener("mouseover", (e) => {
+    const item = e.target.closest(".air-acc-item");
+    if (item === hoverItem) return;
+    hoverItem = item;
+    clearTimeout(hoverTimer);
+    airHoverCard.classList.remove("visible");
+    if (!item || item.classList.contains("open")) return;
+
+    hoverTimer = setTimeout(async () => {
+      if (hoverItem !== item) return;
+      const ri = Number(item.dataset.reportIndex);
+      const report = AIR_REPORTS[ri];
+      const k = Number(item.dataset.dynIndex || 0);
+
+      // Show immediately with whatever we have (may be loading state)
+      airHoverCard.dataset.hoverRi = ri;
+      airHoverCard.innerHTML = _buildHoverHtml(report, DYN_REPORT_DATA[ri], k);
+      _positionHover(item);
+      airHoverCard.classList.add("visible");
+
+      // Fetch if needed, then update in place
+      if (!DYN_REPORT_DATA[ri] && report?.dynamic) {
+        const data = await _prefetchForHover(ri);
+        if (hoverItem === item && data) {
+          airHoverCard.innerHTML = _buildHoverHtml(report, data, k);
+        }
+      }
+    }, 250);
+  });
+
+  reportsView.addEventListener("mouseout", (e) => {
+    const to = e.relatedTarget;
+    if (to && (to === airHoverCard || airHoverCard.contains(to))) return;
+    const toItem = to && to.closest(".air-acc-item");
+    if (toItem && toItem === hoverItem) return;
+    hoverItem = null;
+    clearTimeout(hoverTimer);
+    airHoverCard.classList.remove("visible");
+  });
+
+  airHoverCard.addEventListener("mouseleave", () => {
+    hoverItem = null;
+    airHoverCard.classList.remove("visible");
+  });
+
+  airHoverCard.addEventListener("click", (e) => {
+    if (!e.target.closest(".air-hprev-more")) return;
+    airHoverCard.classList.remove("visible");
+    // Find the accordion item that was being hovered and open it
+    const activeItem = document.querySelector(`.air-acc-item[data-report-index="${airHoverCard.dataset.hoverRi}"]`);
+    if (activeItem && !activeItem.classList.contains("open")) {
+      activeItem.classList.add("open");
+      fillReportCard(Number(airHoverCard.dataset.hoverRi));
     }
   });
 }
@@ -3356,7 +3516,6 @@ function openReports() {
     reportsView.style.display = "";
     reportsView.innerHTML = renderReportsView();
     reportsView.scrollTop = 0;
-    expandAllReports();
   }
 }
 
