@@ -833,9 +833,7 @@ def invoice_tax_query_api(request):
         message = f"No GST-bearing **Total {label}** records found{scope}."
     else:
         message = (
-            f"Here's **Total {label}**{scope} (GST records only) — {len(rows)} party(ies), "
-            f"₹{totals['amount']:,.2f} taxable · CGST ₹{totals['cgst']:,.2f} · "
-            f"SGST ₹{totals['sgst']:,.2f} · IGST ₹{totals['igst']:,.2f}."
+            f"Here's **Total {label}**{scope} (GST records only) — {len(rows)} party(ies)."
         )
 
     return JsonResponse({
