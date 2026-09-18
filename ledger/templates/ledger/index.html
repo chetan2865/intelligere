@@ -1,28 +1,52 @@
 {% load static %}
-{# `v` cache-busts every reload during active dev so browser-cached JS/CSS #}
-{# never masks a real code change again (see: the Entry Count/Opening #}
-{# Balance card that kept reappearing after edits). Fine for a low-traffic #}
-{# internal tool; swap to a fixed build hash before this matters for scale. #}
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Intelligere</title>
     <script>
       // Applied before first paint so the page never flashes the wrong theme.
       (function () {
-        var saved = localStorage.getItem('ledger-theme');
-        var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        var saved = localStorage.getItem("ledger-theme");
+        var theme =
+          saved ||
+          (window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light");
         document.documentElement.dataset.theme = theme;
       })();
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="icon" type="image/png" href="{% static 'ledger/logo.png' %}?v={% now 'U' %}" />
-    <link rel="shortcut icon" type="image/png" href="{% static 'ledger/logo.png' %}?v={% now 'U' %}" />
-    <link rel="apple-touch-icon" href="{% static 'ledger/logo.png' %}?v={% now 'U' %}" />
-    <link rel="stylesheet" href="{% static 'ledger/css/style.css' %}?v={% now 'U' %}" />
-    <link rel="stylesheet" href="{% static 'ledger/css/responsive.css' %}?v={% now 'U' %}" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      href="{% static 'ledger/logo.png' %}?v={% now 'U' %}"
+    />
+    <link
+      rel="shortcut icon"
+      type="image/png"
+      href="{% static 'ledger/logo.png' %}?v={% now 'U' %}"
+    />
+    <link
+      rel="apple-touch-icon"
+      href="{% static 'ledger/logo.png' %}?v={% now 'U' %}"
+    />
+    <link
+      rel="stylesheet"
+      href="{% static 'ledger/css/style.css' %}?v={% now 'U' %}"
+    />
+    <link
+      rel="stylesheet"
+      href="{% static 'ledger/css/responsive.css' %}?v={% now 'U' %}"
+    />
   </head>
   <body>
     <div class="app">
@@ -122,7 +146,9 @@
                 width="1em"
                 xmlns="http://www.w3.org/2000/svg"
               >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <path
+                  d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                ></path>
                 <polyline points="14 2 14 8 20 8"></polyline>
                 <line x1="12" y1="18" x2="12" y2="12"></line>
                 <line x1="9" y1="15" x2="15" y2="15"></line></svg></span
@@ -182,7 +208,9 @@
               >
                 <path d="M9 18h6"></path>
                 <path d="M10 22h4"></path>
-                <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"></path></svg></span
+                <path
+                  d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"
+                ></path></svg></span
             ><span>My AI Report</span>
           </button>
           <div class="sidebar-most-used" id="sidebarMostUsed"></div>
@@ -226,7 +254,9 @@
                 stroke-linejoin="round"
               >
                 <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <path
+                  d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                ></path>
                 <line x1="10" y1="11" x2="10" y2="17"></line>
                 <line x1="14" y1="11" x2="14" y2="17"></line>
               </svg>
@@ -295,7 +325,7 @@
 
     {# Hidden csrftoken input purely so Django sets the csrftoken cookie on #}
     {# load; the export-to-PDF fetch in main.js reads that cookie. #}
-    <form style="display:none">{% csrf_token %}</form>
+    <form style="display: none">{% csrf_token %}</form>
 
     <script>
       window.TOTAL_LEDGERS = "{{ ledger_count|escapejs }}";
@@ -315,7 +345,8 @@
       const REPORT_SP_URL = "{% url 'ledger:report_supplier_payment_api' %}";
       const REPORT_SM_URL = "{% url 'ledger:report_slow_moving_api' %}";
       const REPORT_VD_URL = "{% url 'ledger:report_vendor_delivery_api' %}";
-      const REPORT_IC_URL = "{% url 'ledger:report_immediate_collection_api' %}";
+      const REPORT_IC_URL =
+        "{% url 'ledger:report_immediate_collection_api' %}";
       const REPORT_HV_URL = "{% url 'ledger:report_high_value_overdue_api' %}";
       const REPORT_ST_URL = "{% url 'ledger:report_stock_transfer_api' %}";
       const LOGO_URL = "{% static 'ledger/logo.png' %}";
