@@ -2889,11 +2889,14 @@ function renderReportsView() {
         <div class="air-acc-body"><div class="air-acc-card" id="accCard-${i}"></div></div>
       </div>`;
   }).join("");
+  const dropdown = (type, values) =>
+    `<select class="air-filter-select" data-ftype="${type}">${values.map((v) => `<option value="${v}">${v}</option>`).join("")}</select>`;
   return `
     <div class="air-view">
       <div class="air-filters">
-        <div class="air-filter-group" data-group="cat"><span class="air-filter-label">Category:</span>${chips("cat", AIR_CATEGORIES)}</div>
-        <div class="air-filter-group" data-group="pri"><span class="air-filter-label">Priority:</span>${chips("pri", AIR_PRIORITIES)}</div>
+        <div class="air-filter-group" data-group="cat"><span class="air-filter-label">Category:</span>${dropdown("cat", AIR_CATEGORIES)}</div>
+        <span class="air-filter-and">AND</span>
+        <div class="air-filter-group" data-group="pri"><span class="air-filter-label">Priority:</span>${dropdown("pri", AIR_PRIORITIES)}</div>
       </div>
       <div class="air-accordion" id="airIndex">${items}</div>
       <div class="air-empty" id="airEmpty" style="display:none;">No reports match these filters.</div>
@@ -3246,14 +3249,14 @@ async function loadDynamicReport(i, slot) {
 function applyAirFilters() {
   const list = document.getElementById("airIndex");
   if (!list) return;
-  const catBtn = document.querySelector(
-    '.air-filter-group[data-group="cat"] .air-chip.active',
+  const catSel = document.querySelector(
+    '.air-filter-group[data-group="cat"] .air-filter-select',
   );
-  const priBtn = document.querySelector(
-    '.air-filter-group[data-group="pri"] .air-chip.active',
+  const priSel = document.querySelector(
+    '.air-filter-group[data-group="pri"] .air-filter-select',
   );
-  const cat = catBtn ? catBtn.dataset.fval : "All";
-  const pri = priBtn ? priBtn.dataset.fval.toLowerCase() : "all";
+  const cat = catSel ? catSel.value : "All";
+  const pri = priSel ? priSel.value.toLowerCase() : "all";
   let shown = 0;
   list.querySelectorAll(".air-acc-item").forEach((item) => {
     const okCat = cat === "All" || item.dataset.cat === cat;
@@ -3269,8 +3272,11 @@ function applyAirFilters() {
 }
 
 // Reports dashboard interactions (delegated on the reports container): expand /
-// collapse an accordion item, filter chips, and the per-card "Similar Results".
+// collapse an accordion item, filter dropdowns, and the per-card "Similar Results".
 if (reportsView) {
+  reportsView.addEventListener("change", (e) => {
+    if (e.target.closest(".air-filter-select")) applyAirFilters();
+  });
   reportsView.addEventListener("click", (e) => {
     // Company switcher first, so it never triggers the header collapse.
     const mainBtn = e.target.closest(".air-main-prev, .air-main-next");
@@ -3326,15 +3332,6 @@ if (reportsView) {
         hoverItem = null;
         clearTimeout(hoverTimer);
       }
-      return;
-    }
-    const chip = e.target.closest(".air-chip");
-    if (chip) {
-      chip
-        .closest(".air-filter-group")
-        .querySelectorAll(".air-chip")
-        .forEach((c) => c.classList.toggle("active", c === chip));
-      applyAirFilters();
       return;
     }
     const pillsToggle = e.target.closest(".air-pills-toggle");
