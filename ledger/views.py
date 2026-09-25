@@ -1978,19 +1978,19 @@ def report_stock_transfer_api(request):
     if not req:
         return JsonResponse({'found': False, 'company_name': company_name})
 
-    # Per-warehouse stock per product (Product stores the company by name).
+    # Per-warehouse stock, aggregated by item NAME across every Product row (an
+    # item can have several rows / SKUs; summing avoids duplicate cards and
+    # partial-stock errors).
     products = Product.objects.filter(deleted=False)
     if company_name:
         products = products.filter(company=company_name)
 
-    items = []
+    wh_by_name = defaultdict(lambda: defaultdict(float))
+    mains_by_name = defaultdict(set)
     for product in products:
         name = (product.item_name or '').strip()
-        requirement = req.get(name, 0.0)
-        if requirement <= 0:
+        if not name or req.get(name, 0.0) <= 0:
             continue
-        wh_stock = defaultdict(float)
-        mains = set()
         for sku in (product.sku or []):
             if not isinstance(sku, dict):
                 continue
@@ -1998,9 +1998,14 @@ def report_stock_transfer_api(request):
                 if not isinstance(wh, dict):
                     continue
                 wname = wh.get('name') or 'Unassigned'
-                wh_stock[wname] += _to_number(wh.get('qty')) or 0.0
+                wh_by_name[name][wname] += _to_number(wh.get('qty')) or 0.0
                 if wh.get('is_main'):
-                    mains.add(wname)
+                    mains_by_name[name].add(wname)
+
+    items = []
+    for name, wh_stock in wh_by_name.items():
+        requirement = req.get(name, 0.0)
+        mains = mains_by_name[name]
         if len(wh_stock) < 2:
             continue  # nothing to transfer between
 
@@ -2064,6 +2069,224 @@ def report_stock_transfer_api(request):
         'similar_title': 'Similar Result',
         'similar_headers': ['Product', 'Requirement', 'Transferable'],
         'warehouse_headers': ['Warehouse', 'Stock', 'Requirement', 'Excess/Shortage'],
+        'cards': cards,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Report 1 — When & How Much to Purchase (merges the old point 9, Purchase
+# Timing / Reorder). Everything is per product:
+#   Current Stock     — direct read from Product.sku qty when Inventory
+#                       Management is on (the qty is already live; no add/sub).
+#                       (The "Uploadcsv" fallback for companies without the
+#                       module is not present in this backend, so those show
+#                       no stock source.)
+#   Avg Daily Sale    — units sold in the last 30 days (InvoiceData, doc_type
+#                       'Invoice') / 30.
+#   Supplier Lead Time— avg(Inbound Challan date − Outbound PO date); taken per
+#                       supplier via the product's vendor, else the company-wide
+#                       average.
+#   Days Stock Left   — Current Stock / Avg Daily Sale.
+#   Order Gap         — Days Left − Lead Time (<=0 means order now).
+#   Recommended Buy   — Avg Daily Sale × Lead Time + Min Qty − Current Stock.
+# ---------------------------------------------------------------------------
+
+def _supplier_lead_times(company_id=None):
+    """(per_supplier_avg, company_avg) lead times in days, from Outbound Purchase
+    Orders vs Inbound Challans. Each receipt is paired with the most recent order
+    to that supplier on/before it (same method as report 7)."""
+    oqs = Invoice.objects.filter(doc_type='Outbound Purchase Order')
+    iqs = Invoice.objects.filter(doc_type='Inbound Challan')
+    if company_id:
+        oqs = oqs.filter(Seller_data=str(company_id))
+        iqs = iqs.filter(Seller_data=str(company_id))
+    orders = defaultdict(list)
+    receipts = defaultdict(list)
+    for inv in oqs:
+        p = _delivery_party(inv)
+        d = inv.doc_date or inv.Invoice_date
+        if p and d:
+            orders[p].append(d)
+    for inv in iqs:
+        p = _delivery_party(inv)
+        d = inv.doc_date or inv.Invoice_date
+        if p and d:
+            receipts[p].append(d)
+    per_supplier = {}
+    all_times = []
+    for party in set(orders) & set(receipts):
+        order_dates = sorted(orders[party])
+        times = []
+        for challan in sorted(receipts[party]):
+            prior = [o for o in order_dates if o <= challan]
+            if prior:
+                days = (challan - prior[-1]).days
+                if days >= 0:
+                    times.append(days)
+        if times:
+            per_supplier[party] = sum(times) / len(times)
+            all_times.extend(times)
+    company_avg = (sum(all_times) / len(all_times)) if all_times else None
+    return per_supplier, company_avg
+
+
+def _product_vendor_names(product):
+    """Vendor names attached to a product (Product.vendor is a list of dicts)."""
+    names = []
+    vendors = product.vendor
+    if isinstance(vendors, list):
+        for v in vendors:
+            if isinstance(v, dict) and v.get('name'):
+                names.append(str(v['name']).strip())
+    return names
+
+
+def report_purchase_timing_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    per_supplier, company_avg = _supplier_lead_times(company_id)
+    if company_avg is None:
+        # No purchase-order/challan history → lead time is unknown, so the
+        # timing math can't run.
+        return JsonResponse({'found': False, 'company_name': company_name})
+    per_supplier_upper = {k.upper(): v for k, v in per_supplier.items()}
+
+    today = timezone.localdate()
+    since = today - timedelta(days=30)
+    sold = defaultdict(float)
+    sales = InvoiceData.objects.filter(
+        doc_type='Invoice',
+        Invoice_data__Invoice_date__gte=since,
+        Invoice_data__Invoice_date__lte=today,
+    )
+    if company_id:
+        sales = sales.filter(Invoice_data__Seller_data=str(company_id))
+    for name, qty in sales.values_list('Products', 'quantity'):
+        key = (name or '').strip()
+        if key:
+            sold[key] += _to_number(qty) or 0.0
+
+    # The same item can exist as several Product rows (multiple SKUs / duplicate
+    # entries), so aggregate everything by item name: total current stock, the
+    # highest minimum-quantity seen, and the union of vendors. Otherwise one
+    # partial row would look out of stock and the item would show up many times.
+    products = Product.objects.filter(deleted=False)
+    if company_name:
+        products = products.filter(company=company_name)
+
+    stock_by_name = defaultdict(float)
+    minq_by_name = defaultdict(float)
+    vendors_by_name = defaultdict(set)
+    for product in products:
+        name = (product.item_name or '').strip()
+        if not name:
+            continue
+        stock_by_name[name] += sum(
+            _sku_qty(s) or 0.0 for s in (product.sku or []) if isinstance(s, dict))
+        other = product.other_details if isinstance(product.other_details, dict) else {}
+        mq = _to_number(other.get('Minimum Quantity')) or 0.0
+        if mq > minq_by_name[name]:
+            minq_by_name[name] = mq
+        for nm in _product_vendor_names(product):
+            vendors_by_name[name].add(nm)
+
+    items = []
+    for name, sold_total in sold.items():
+        if name not in stock_by_name:
+            continue
+        avg_daily = sold_total / 30.0
+        if avg_daily <= 0:
+            continue  # not selling → no reorder timing needed
+        stock = stock_by_name[name]
+        min_qty = minq_by_name[name]
+
+        # Lead time: average of this item's vendors that have history, else the
+        # company-wide average.
+        matched = [per_supplier_upper[n.upper()] for n in vendors_by_name[name]
+                   if n.upper() in per_supplier_upper]
+        lead = round(sum(matched) / len(matched)) if matched else round(company_avg)
+
+        days_left = round(max(stock, 0.0) / avg_daily)
+        gap = days_left - lead
+        # Reorder point = demand over the lead time + safety (min qty). Buy-now is
+        # how much to order today to get back to it; when there's still cover, we
+        # instead suggest the standing order lot to place when the time comes.
+        reorder_point = avg_daily * lead + min_qty
+        buy_now = max(round(reorder_point - stock), 0)
+        order_lot = max(round(reorder_point), 1)
+        rec_qty = buy_now if buy_now > 0 else order_lot
+        items.append({
+            'name': name, 'stock': stock, 'avg_daily': avg_daily,
+            'min_qty': min_qty, 'lead': lead, 'days_left': days_left,
+            'gap': gap, 'buy_qty': rec_qty, 'urgent': gap <= 0,
+        })
+
+    if not items:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    # Most urgent first (smallest / most negative gap).
+    items.sort(key=lambda x: x['gap'])
+
+    def gap_text(gap):
+        if gap < 0:
+            return f"{gap} days (overdue)"
+        if gap == 0:
+            return "0 days (order now)"
+        return f"+{gap} days"
+
+    def action_label(gap):
+        if gap <= -10:
+            return '🔴 Order urgently'
+        if gap <= 0:
+            return '🟠 Order today'
+        return f'🟡 Order in {gap} days'
+
+    cards = []
+    for m in items[:5]:
+        gap, buy, dl, lead = m['gap'], m['buy_qty'], m['days_left'], m['lead']
+        if gap < 0:
+            impact = f"You may run out before new stock arrives — a {abs(gap)}-day gap."
+        elif gap == 0:
+            impact = "Stock runs out right as delivery arrives — no buffer."
+        else:
+            impact = f"Stock is enough for now; the next order is due in about {gap} days."
+        when = 'today' if gap <= 0 else f'in {gap} days'
+        cards.append({
+            'name': m['name'],
+            'title': f"Purchase {_fmt_units(buy)} units of {m['name']}",
+            'why': (f"{m['name']} may finish in {dl} days, but the supplier "
+                    f"takes {lead} days to deliver."),
+            'impact': impact,
+            'action': (f"Place the order for {_fmt_units(buy)} units {when} so it "
+                       f"arrives before stock runs out."),
+            'detail': [
+                ['Current Stock', f"{_fmt_units(m['stock'])} units"],
+                ['Avg Daily Sale', f"{m['avg_daily']:.2f} / day"],
+                ['Supplier Lead Time', f"{lead} days"],
+                ['Minimum Qty', _fmt_units(m['min_qty'])],
+                ['Days Stock Will Last', f"{dl} days"],
+                ['Order Gap', gap_text(gap)],
+                ['Recommended Purchase', f"{_fmt_units(buy)} units"],
+                ['Stock Source', 'Inventory Management (live qty)'],
+            ],
+            'row': [
+                m['name'], f"{dl} days", f"{lead} days",
+                gap_text(gap), f"{_fmt_units(buy)} units", action_label(gap),
+            ],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Create PO'],
+        'similar_title': 'Similar Result',
+        'similar_headers': ['Item', 'Days Stock Left', 'Supplier Lead Time',
+                            'Gap', 'Recommended Qty', 'Action'],
         'cards': cards,
     })
 

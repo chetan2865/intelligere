@@ -24,5 +24,6 @@ urlpatterns = [
     path('api/report/immediate-collection/', views.report_immediate_collection_api, name='report_immediate_collection_api'),
     path('api/report/high-value-overdue/', views.report_high_value_overdue_api, name='report_high_value_overdue_api'),
     path('api/report/stock-transfer/', views.report_stock_transfer_api, name='report_stock_transfer_api'),
+    path('api/report/purchase-timing/', views.report_purchase_timing_api, name='report_purchase_timing_api'),
     path('api/export-pdf/', views.export_pdf_api, name='export_pdf_api'),
 ]

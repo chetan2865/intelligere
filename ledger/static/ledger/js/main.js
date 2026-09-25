@@ -2311,6 +2311,7 @@ const AIR_REPORTS = [
     priority: "critical",
     filter: "Inventory",
     category: "Inventory",
+    dynamic: { url: REPORT_PT_URL, layout: "wide", wideKind: "purchase" },
     title: "Purchase Item X — 500 Units",
     problem: "Item X may finish in 12 days.",
     why: "Supplier delivery takes 18 days.",
@@ -2543,22 +2544,6 @@ const AIR_REPORTS = [
         ["XYZ", "95%", "30%", "70%"],
       ],
     },
-  },
-  {
-    priority: "high",
-    filter: "Inventory",
-    category: "Inventory",
-    title: "Purchase Earlier for Item P",
-    problem: "Item P often reaches low stock before delivery.",
-    why: "Supplier usually takes 25 days instead of the expected 15 days.",
-    impact: "Higher chance of stock shortage.",
-    action: "Place the order earlier to account for the actual delivery time.",
-    buttons: ["Review Purchase Timing"],
-    visual: {
-      type: "timeline-steps",
-      data: { expected: 15, actual: 25, delta: 10 },
-    },
-    similar: null,
   },
   {
     priority: "critical",
@@ -2848,13 +2833,12 @@ const AIR_HEADINGS = [
   "Reduce Purchase for Slow-Moving Item",
   "Find Alternative Supplier",
   "Change Supplier Allocation",
-  "Purchase Earlier",
   "Immediate Invoice Collection",
   "High-Value Overdue Receivable",
 ];
 
-// Reports dashboard: an accordion of all 11 report headings. Clicking a heading
-// drops down its recommendation card inline (report 4 loads live from recPay).
+// Reports dashboard: an accordion of the report headings. Clicking a heading
+// drops down its recommendation card inline (dynamic reports load live data).
 function renderReportsView() {
   const chips = (type, values) =>
     values
@@ -3068,6 +3052,8 @@ function renderWidePills(data) {
     items = `${pill("whyimpact", "Why & Impact")}${pill("deliveries", "Deliveries")}${pill("similar", "Similar Result")}`;
   } else if (data._wideKind === "stock_transfer") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("warehouses", "Warehouses")}${pill("similar", "Other Products")}`;
+  } else if (data._wideKind === "purchase") {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("detail", "Details")}${pill("similar", "Similar Result")}`;
   } else if (data._wideKind === "invoice") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("contact", "📞 Contact")}${pill("similar", "Similar Result")}`;
   } else {
@@ -3179,6 +3165,19 @@ function renderWideBody(data, k) {
       : "";
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="warehouses">${whTable}${actionLine}</div>
+      ${similarPanel}`;
+  } else if (data._wideKind === "purchase") {
+    const detailLines = (c.detail || [])
+      .map(
+        ([kk, v]) =>
+          `<div class="air-hover-line"><b>${escapeHtml(kk)}:</b> ${escapeHtml(String(v))}</div>`,
+      )
+      .join("");
+    const actionLine = c.action
+      ? `<div class="air-block air-wi-full"><div class="air-block-label lbl-action">Recommended Action</div><div class="air-block-text">${escapeHtml(c.action)}</div></div>`
+      : "";
+    panels = `${whyImpactPanel}
+      <div class="air-tab-panel" data-panel="detail">${detailLines || '<div class="air-empty">No details.</div>'}${actionLine}</div>
       ${similarPanel}`;
   } else if (data._wideKind === "invoice") {
     panels = `${whyImpactPanel}
