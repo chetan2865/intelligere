@@ -2221,6 +2221,32 @@ tr.clickable-row:hover td {
 .air-hover-line {
   padding: 2px 0;
 }
+/* step-by-step calculation panel (reports 1 & 2) */
+.air-math {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.air-math-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-main);
+}
+.air-math-lbl {
+  min-width: 170px;
+  font-weight: 700;
+  color: var(--accent-1);
+}
+.air-math-expr {
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+}
 .air-hover-row {
   display: flex;
   justify-content: space-between;

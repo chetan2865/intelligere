@@ -2342,6 +2342,7 @@ const AIR_REPORTS = [
     priority: "critical",
     filter: "Purchase",
     category: "Purchase Order",
+    dynamic: { url: REPORT_PO_URL, layout: "wide", wideKind: "purchase" },
     title: "Open PO Short by 200 Units",
     problem: "Existing open PO may not cover upcoming demand.",
     why: "Required quantity is 500 units, while only 300 units are currently on order.",
@@ -2511,6 +2512,7 @@ const AIR_REPORTS = [
     priority: "high",
     filter: "Suppliers",
     category: "Supplier Allocation",
+    dynamic: { url: REPORT_SA_URL, layout: "wide", wideKind: "allocation" },
     title: "Shift Purchase Allocation",
     problem:
       "One supplier is performing significantly worse than another supplier.",
@@ -3052,8 +3054,8 @@ function renderWidePills(data) {
     items = `${pill("whyimpact", "Why & Impact")}${pill("deliveries", "Deliveries")}${pill("similar", "Similar Result")}`;
   } else if (data._wideKind === "stock_transfer") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("warehouses", "Warehouses")}${pill("similar", "Other Products")}`;
-  } else if (data._wideKind === "purchase") {
-    items = `${pill("whyimpact", "Why & Impact")}${pill("detail", "Details")}${pill("similar", "Similar Result")}`;
+  } else if (data._wideKind === "purchase" || data._wideKind === "allocation") {
+    items = `${pill("whyimpact", "Why & Impact")}${pill("detail", "Details")}${pill("calc", "🧮 Calculation")}${pill("similar", "Similar Result")}`;
   } else if (data._wideKind === "invoice") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("contact", "📞 Contact")}${pill("similar", "Similar Result")}`;
   } else {
@@ -3166,7 +3168,7 @@ function renderWideBody(data, k) {
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="warehouses">${whTable}${actionLine}</div>
       ${similarPanel}`;
-  } else if (data._wideKind === "purchase") {
+  } else if (data._wideKind === "purchase" || data._wideKind === "allocation") {
     const detailLines = (c.detail || [])
       .map(
         ([kk, v]) =>
@@ -3176,8 +3178,18 @@ function renderWideBody(data, k) {
     const actionLine = c.action
       ? `<div class="air-block air-wi-full"><div class="air-block-label lbl-action">Recommended Action</div><div class="air-block-text">${escapeHtml(c.action)}</div></div>`
       : "";
+    const mathRows = (c.math || [])
+      .map(
+        ([lbl, expr]) =>
+          `<div class="air-math-row"><span class="air-math-lbl">${escapeHtml(lbl)}</span><span class="air-math-expr">${escapeHtml(expr)}</span></div>`,
+      )
+      .join("");
+    const mathPanel = mathRows
+      ? `<div class="air-math">${mathRows}</div>`
+      : '<div class="air-empty">No calculation available.</div>';
     panels = `${whyImpactPanel}
       <div class="air-tab-panel" data-panel="detail">${detailLines || '<div class="air-empty">No details.</div>'}${actionLine}</div>
+      <div class="air-tab-panel" data-panel="calc">${mathPanel}</div>
       ${similarPanel}`;
   } else if (data._wideKind === "invoice") {
     panels = `${whyImpactPanel}

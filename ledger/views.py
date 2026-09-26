@@ -2224,6 +2224,8 @@ def report_purchase_timing_api(request):
             'name': name, 'stock': stock, 'avg_daily': avg_daily,
             'min_qty': min_qty, 'lead': lead, 'days_left': days_left,
             'gap': gap, 'buy_qty': rec_qty, 'urgent': gap <= 0,
+            'sold': sold_total, 'reorder_point': round(reorder_point),
+            'buy_now': buy_now,
         })
 
     if not items:
@@ -2274,6 +2276,20 @@ def report_purchase_timing_api(request):
                 ['Recommended Purchase', f"{_fmt_units(buy)} units"],
                 ['Stock Source', 'Inventory Management (live qty)'],
             ],
+            'math': [
+                ['Avg Daily Sale',
+                 f"{_fmt_units(m['sold'])} sold in 30 days ÷ 30 = {m['avg_daily']:.2f} / day"],
+                ['Days Stock Will Last',
+                 f"{_fmt_units(m['stock'])} stock ÷ {m['avg_daily']:.2f} / day = {dl} days"],
+                ['Order Gap',
+                 f"{dl} days cover − {lead} days lead = {gap} days"],
+                ['Reorder Point',
+                 f"({m['avg_daily']:.2f} / day × {lead} days) + {_fmt_units(m['min_qty'])} min = {_fmt_units(m['reorder_point'])} units"],
+                ['Recommended Purchase',
+                 (f"{_fmt_units(m['reorder_point'])} reorder point − {_fmt_units(m['stock'])} stock = {_fmt_units(buy)} units (order now)"
+                  if m['buy_now'] > 0 else
+                  f"stock {_fmt_units(m['stock'])} still above reorder point {_fmt_units(m['reorder_point'])}; suggested lot when due = {_fmt_units(buy)} units")],
+            ],
             'row': [
                 m['name'], f"{dl} days", f"{lead} days",
                 gap_text(gap), f"{_fmt_units(buy)} units", action_label(gap),
@@ -2287,6 +2303,375 @@ def report_purchase_timing_api(request):
         'similar_title': 'Similar Result',
         'similar_headers': ['Item', 'Days Stock Left', 'Supplier Lead Time',
                             'Gap', 'Recommended Qty', 'Action'],
+        'cards': cards,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Report 2 — Is Existing Open PO Enough? Checks whether what's already on hand
+# plus what's already on order will cover the demand expected over the supplier
+# lead time.
+#   Upcoming Requirement = Avg Daily Consumption × Lead Time + Min Qty
+#   Available Supply     = Current Stock + Open PO qty
+#   Shortage             = Upcoming Requirement − Available Supply   (>0 = short)
+# Avg Daily Consumption and Current Stock are the same live sources as report 1;
+# Open PO qty is the total quantity on Outbound Purchase Order lines per product.
+# ---------------------------------------------------------------------------
+
+def report_open_po_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    per_supplier, company_avg = _supplier_lead_times(company_id)
+    if company_avg is None:
+        return JsonResponse({'found': False, 'company_name': company_name})
+    per_supplier_upper = {k.upper(): v for k, v in per_supplier.items()}
+
+    today = timezone.localdate()
+    since = today - timedelta(days=30)
+
+    # Avg daily consumption source: sales invoice lines over the last 30 days.
+    sold = defaultdict(float)
+    sales = InvoiceData.objects.filter(
+        doc_type='Invoice',
+        Invoice_data__Invoice_date__gte=since,
+        Invoice_data__Invoice_date__lte=today,
+    )
+    if company_id:
+        sales = sales.filter(Invoice_data__Seller_data=str(company_id))
+    for name, qty in sales.values_list('Products', 'quantity'):
+        key = (name or '').strip()
+        if key:
+            sold[key] += _to_number(qty) or 0.0
+
+    # Open PO qty = ordered but NOT yet received. Outbound Purchase Order lines
+    # are the ordered qty; Inbound Challan lines are what has already arrived
+    # (and is therefore already counted in current stock). Counting the full
+    # ordered qty would double-count the received part, so open PO = ordered −
+    # received.
+    def _line_qty_by_product(doc_type):
+        d = defaultdict(float)
+        qs = InvoiceData.objects.filter(doc_type=doc_type)
+        if company_id:
+            qs = qs.filter(Invoice_data__Seller_data=str(company_id))
+        for name, qty in qs.values_list('Products', 'quantity'):
+            key = (name or '').strip()
+            if key:
+                d[key] += _to_number(qty) or 0.0
+        return d
+
+    ordered = _line_qty_by_product('Outbound Purchase Order')
+    received = _line_qty_by_product('Inbound Challan')
+    open_po = defaultdict(float)
+    for name in set(ordered) | set(received):
+        open_po[name] = max(ordered.get(name, 0.0) - received.get(name, 0.0), 0.0)
+
+    # Stock / min qty / vendors, aggregated by item name across Product rows.
+    products = Product.objects.filter(deleted=False)
+    if company_name:
+        products = products.filter(company=company_name)
+    stock_by_name = defaultdict(float)
+    minq_by_name = defaultdict(float)
+    vendors_by_name = defaultdict(set)
+    for product in products:
+        name = (product.item_name or '').strip()
+        if not name:
+            continue
+        stock_by_name[name] += sum(
+            _sku_qty(s) or 0.0 for s in (product.sku or []) if isinstance(s, dict))
+        other = product.other_details if isinstance(product.other_details, dict) else {}
+        mq = _to_number(other.get('Minimum Quantity')) or 0.0
+        if mq > minq_by_name[name]:
+            minq_by_name[name] = mq
+        for nm in _product_vendor_names(product):
+            vendors_by_name[name].add(nm)
+
+    items = []
+    for name, sold_total in sold.items():
+        if name not in stock_by_name:
+            continue
+        avg_daily = sold_total / 30.0
+        if avg_daily <= 0:
+            continue
+        matched = [per_supplier_upper[n.upper()] for n in vendors_by_name[name]
+                   if n.upper() in per_supplier_upper]
+        lead = round(sum(matched) / len(matched)) if matched else round(company_avg)
+        min_qty = minq_by_name[name]
+        requirement = round(avg_daily * lead + min_qty)
+        stock = stock_by_name[name]
+        po = open_po.get(name, 0.0)
+        supply = stock + po
+        shortage = round(requirement - supply)  # >0 short, <=0 covered (surplus)
+        cover_days = round(supply / avg_daily)   # how long total supply lasts
+        items.append({
+            'name': name, 'stock': stock, 'po': po, 'supply': supply,
+            'avg_daily': avg_daily, 'lead': lead, 'min_qty': min_qty,
+            'requirement': requirement, 'shortage': shortage,
+            'cover_days': cover_days,
+            'sold': sold_total, 'ordered': ordered.get(name, 0.0),
+            'received': received.get(name, 0.0),
+        })
+
+    if not items:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    # Genuine shortages first (biggest shortage on top); then the items whose
+    # total supply runs out soonest (fewest days of cover) — so high-demand,
+    # thinly-covered items surface ahead of slow movers sitting on months of stock.
+    items.sort(key=lambda x: (
+        0 if x['shortage'] > 0 else 1,
+        -x['shortage'] if x['shortage'] > 0 else x['cover_days'],
+    ))
+
+    cards = []
+    for m in items[:5]:
+        short = m['shortage']
+        surplus = -short
+        if short > 0:
+            title = f"Order {_fmt_units(short)} more units of {m['name']}."
+            impact = f"You may face a {_fmt_units(short)} unit shortage."
+            action = (f"Raise an additional purchase order for {_fmt_units(short)} "
+                      f"units of {m['name']}.")
+        else:
+            title = f"Open PO is enough for {m['name']}."
+            impact = f"Covered — a surplus of {_fmt_units(surplus)} units."
+            action = "No new purchase order needed."
+        cards.append({
+            'name': m['name'],
+            'title': title,
+            'why': (f"You have {_fmt_units(m['supply'])} units available for supply, "
+                    f"and you need {_fmt_units(m['requirement'])} units."),
+            'impact': impact,
+            'action': action,
+            'detail': [
+                ['Current Stock', f"{_fmt_units(m['stock'])} units"],
+                ['Open PO', f"{_fmt_units(m['po'])} units"],
+                ['Available Supply', f"{_fmt_units(m['supply'])} units"],
+                ['Avg Daily Consumption', f"{m['avg_daily']:.2f} / day"],
+                ['Supplier Lead Time', f"{m['lead']} days"],
+                ['Minimum Qty', _fmt_units(m['min_qty'])],
+                ['Upcoming Requirement', f"{_fmt_units(m['requirement'])} units"],
+                ['Days of Cover', f"{m['cover_days']} days"],
+                ['Shortage', f"{_fmt_units(short)} units" if short > 0 else 'None (covered)'],
+            ],
+            'math': [
+                ['Avg Daily Consumption',
+                 f"{_fmt_units(m['sold'])} sold in 30 days ÷ 30 = {m['avg_daily']:.2f} / day"],
+                ['Upcoming Requirement',
+                 f"({m['avg_daily']:.2f} / day × {m['lead']} days lead) + {_fmt_units(m['min_qty'])} min = {_fmt_units(m['requirement'])} units"],
+                ['Open PO',
+                 f"{_fmt_units(m['ordered'])} ordered − {_fmt_units(m['received'])} received = {_fmt_units(m['po'])} units"],
+                ['Available Supply',
+                 f"{_fmt_units(m['stock'])} stock + {_fmt_units(m['po'])} open PO = {_fmt_units(m['supply'])} units"],
+                ['Shortage',
+                 f"{_fmt_units(m['requirement'])} required − {_fmt_units(m['supply'])} supply = {_fmt_units(short)} units"
+                 + ('' if short > 0 else ' (covered)')],
+            ],
+            'row': [
+                m['name'], f"{_fmt_units(m['supply'])} units",
+                f"{_fmt_units(m['requirement'])} units",
+                f"{_fmt_units(short)} units" if short > 0 else '✅ Covered',
+            ],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Create PO'],
+        'similar_title': 'Similar Result',
+        'similar_headers': ['Product', 'Available Supply', 'Required Qty', 'Shortage'],
+        'cards': cards,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Report 8 — Change Supplier Allocation (OTIF: On Time In Full).
+#
+# A purchase order "succeeds" only if it arrives BOTH on time AND in full — a
+# late-but-complete or full-but-short delivery both count as failures. Per
+# Outbound PO (linked to its Inbound Challan via the challan line's ref_doc_no):
+#   In-Full = delivered qty >= ordered qty
+#   On-Time = challan date within the typical lead time (company median lead;
+#             the OPOs carry no promised date, so the median stands in for it)
+#   OTIF    = On-Time AND In-Full
+# OTIF% per supplier = OTIF POs / total POs. Suppliers are ranked; for a product
+# whose supplier is a bottom-40% performer, we recommend shifting a share of its
+# orders to the best-OTIF supplier that carries the same product.
+# ---------------------------------------------------------------------------
+
+def _median(values):
+    s = sorted(values)
+    n = len(s)
+    if n == 0:
+        return None
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+def report_supplier_allocation_api(request):
+    company_id = request.GET.get('company_id') or None
+    company_name = None
+    if company_id:
+        company_name = companydata.objects.filter(
+            pk=company_id
+        ).values_list('comp_name', flat=True).first()
+
+    # OPO parent docs: doc_no -> supplier + order date.
+    opo_meta = {}
+    oqs = Invoice.objects.filter(doc_type='Outbound Purchase Order')
+    if company_id:
+        oqs = oqs.filter(Seller_data=str(company_id))
+    for inv in oqs:
+        rj = inv.response_json or {}
+        opo_meta[inv.doc_no] = {
+            'sup': (rj.get('Buyer_data_name') or '').strip(),
+            'date': inv.doc_date or inv.Invoice_date,
+        }
+
+    # OPO lines: ordered qty per PO, and qty per (product, supplier) for allocation.
+    ordered = defaultdict(float)
+    prod_sup_qty = defaultdict(lambda: defaultdict(float))
+    ol = InvoiceData.objects.filter(doc_type='Outbound Purchase Order')
+    if company_id:
+        ol = ol.filter(Invoice_data__Seller_data=str(company_id))
+    for doc_no, product, qty in ol.values_list(
+        'Invoice_data__doc_no', 'Products', 'quantity'
+    ):
+        q = _to_number(qty) or 0.0
+        ordered[doc_no] += q
+        sup = opo_meta.get(doc_no, {}).get('sup', '')
+        pname = (product or '').strip()
+        if sup and pname:
+            prod_sup_qty[pname][sup] += q
+
+    # Inbound Challan lines: delivered qty + latest challan date, keyed to the OPO.
+    delivered = defaultdict(float)
+    challan_date = {}
+    cl = InvoiceData.objects.filter(doc_type='Inbound Challan')
+    if company_id:
+        cl = cl.filter(Invoice_data__Seller_data=str(company_id))
+    for ref, qty, ddate, idate in cl.values_list(
+        'ref_doc_no', 'quantity', 'Invoice_data__doc_date', 'Invoice_data__Invoice_date'
+    ):
+        ref = (ref or '').strip()
+        if not ref:
+            continue
+        delivered[ref] += _to_number(qty) or 0.0
+        d = ddate or idate
+        if d and (ref not in challan_date or d > challan_date[ref]):
+            challan_date[ref] = d
+
+    # On-time bar = the typical (median) delivery lead for this company.
+    leads = [
+        (challan_date[dn] - m['date']).days
+        for dn, m in opo_meta.items()
+        if dn in challan_date and m['date']
+    ]
+    median_lead = _median(leads)
+    if median_lead is None:
+        return JsonResponse({'found': False, 'company_name': company_name})
+    median_lead = round(median_lead)
+
+    # Per-PO OTIF, then per-supplier OTIF%.
+    sup_total = defaultdict(int)
+    sup_otif = defaultdict(int)
+    for dn, m in opo_meta.items():
+        sup = m['sup']
+        if not sup:
+            continue
+        sup_total[sup] += 1
+        deliv = delivered.get(dn, 0.0)
+        in_full = deliv > 0 and deliv >= ordered.get(dn, 0.0)
+        cd = challan_date.get(dn)
+        on_time = cd is not None and m['date'] is not None and (cd - m['date']).days <= median_lead
+        if in_full and on_time:
+            sup_otif[sup] += 1
+
+    sup_pct = {s: round(sup_otif[s] / sup_total[s] * 100) for s in sup_total}
+    if len(sup_pct) < 2:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    # Rank suppliers high→low; the lowest 40% are the underperformers.
+    ranked = sorted(sup_pct, key=lambda s: sup_pct[s], reverse=True)
+    k = max(1, round(len(ranked) * 0.4))
+    bottom_40 = set(ranked[-k:])
+
+    # One card per product where a bottom-40% supplier can be replaced by a
+    # better-OTIF supplier of the same product.
+    rows = []
+    for product, sup_qty in prod_sup_qty.items():
+        sups = [s for s in sup_qty if s in sup_pct]
+        if len(sups) < 2:
+            continue
+        best = max(sups, key=lambda s: sup_pct[s])
+        worst = min(sups, key=lambda s: sup_pct[s])
+        if best == worst or worst not in bottom_40:
+            continue
+        gap = sup_pct[best] - sup_pct[worst]
+        if gap <= 0:
+            continue
+        total_q = sum(sup_qty.values())
+        worst_alloc = round(sup_qty[worst] / total_q * 100) if total_q else 0
+        shift = min(round(gap / 100.0 * worst_alloc), worst_alloc)
+        if shift <= 0:
+            continue
+        rows.append({
+            'product': product, 'worst': worst, 'best': best, 'gap': gap,
+            'worst_pct': sup_pct[worst], 'best_pct': sup_pct[best],
+            'worst_alloc': worst_alloc, 'shift': shift,
+        })
+
+    if not rows:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    rows.sort(key=lambda r: r['gap'], reverse=True)
+
+    cards = []
+    for r in rows[:5]:
+        w, b = r['worst'], r['best']
+        cards.append({
+            'name': r['product'],
+            'title': f"Shift {r['shift']}% of {r['product']} orders from {w} to {b}.",
+            'why': (f"{w} delivers on-time & in-full only {r['worst_pct']}% of the time, "
+                    f"while {b} manages {r['best_pct']}%."),
+            'impact': 'Late or short deliveries disrupt operations and stock planning.',
+            'action': f"Move about {r['shift']}% of {r['product']} purchases from {w} to {b}.",
+            'detail': [
+                ['Product', r['product']],
+                ['Underperforming Supplier', f"{w} — OTIF {r['worst_pct']}%"],
+                ['Best Alternative', f"{b} — OTIF {r['best_pct']}%"],
+                ['Current Allocation to ' + w, f"{r['worst_alloc']}%"],
+                ['Recommended Shift', f"{r['shift']}% of orders"],
+            ],
+            'math': [
+                ['On-Time rule', f"delivered within {median_lead} days (typical lead)"],
+                [f"{w} OTIF %",
+                 f"{sup_otif[w]} OTIF ÷ {sup_total[w]} POs × 100 = {r['worst_pct']}%"],
+                [f"{b} OTIF %",
+                 f"{sup_otif[b]} OTIF ÷ {sup_total[b]} POs × 100 = {r['best_pct']}%"],
+                ['OTIF gap', f"{r['best_pct']}% − {r['worst_pct']}% = {r['gap']}%"],
+                ['Current allocation',
+                 f"{w} holds {r['worst_alloc']}% of {r['product']} order qty"],
+                ['Recommended Shift',
+                 f"{r['gap']}% gap × {r['worst_alloc']}% allocation = move {r['shift']}%"],
+            ],
+            'row': [
+                r['product'], w, f"{r['worst_pct']}%", b, f"{r['best_pct']}%",
+                f"Move {r['shift']}%",
+            ],
+        })
+
+    return JsonResponse({
+        'found': True,
+        'company_name': company_name,
+        'buttons': ['Rebalance Suppliers'],
+        'similar_title': 'Similar Result',
+        'similar_headers': ['Product', 'From Supplier', 'OTIF %', 'To Supplier',
+                            'OTIF %', 'Recommended Shift'],
         'cards': cards,
     })
 
