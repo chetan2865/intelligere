@@ -1955,18 +1955,13 @@ function renderForecastCardInner(id) {
     )
     .join("");
   const content =
-    state.view === "graph"
-      ? buildForecastGraph(data)
-      : state.view === "calc"
-        ? buildForecastCalc(data)
-        : buildForecastTable(data);
+    state.view === "graph" ? buildForecastGraph(data) : buildForecastTable(data);
   card.innerHTML = `
     <div class="fc-head">
       <div class="fc-msg">${renderMarkdownLite(applyLabelOverrides(data.message))}</div>
       <div class="fc-toggle" role="group" aria-label="View">
         <button type="button" class="fc-toggle-btn ${state.view === "table" ? "active" : ""}" data-fc-view="table">▦ Table</button>
         <button type="button" class="fc-toggle-btn ${state.view === "graph" ? "active" : ""}" data-fc-view="graph">📈 Graph</button>
-        <button type="button" class="fc-toggle-btn ${state.view === "calc" ? "active" : ""}" data-fc-view="calc">🧮 Calculation</button>
       </div>
     </div>
     <div class="module-filter-bar active fc-filter">
@@ -2079,18 +2074,6 @@ function buildForecastGraph(data) {
       </svg>
       <div class="fc-legend">${legend}</div>
     </div>`;
-}
-
-function buildForecastCalc(data) {
-  const rows = (data.calc || [])
-    .map(
-      ([label, text]) =>
-        `<div class="air-math-row"><span class="air-math-lbl">${escapeHtml(label)}</span><span class="air-math-expr">${escapeHtml(text)}</span></div>`,
-    )
-    .join("");
-  return rows
-    ? `<div class="air-math">${rows}</div>`
-    : '<div class="air-empty">No calculation available.</div>';
 }
 
 function buildForecastTable(data) {
