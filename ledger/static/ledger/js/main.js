@@ -1489,6 +1489,27 @@ const INVENTORY_FILTER_PATTERNS = [
   },
 ];
 
+// Sales Forecasting module (locked to one company on the backend). Keys encode
+// side (sales/purchase) + measure (product qty / revenue-or-expenditure).
+const FORECAST_PEBBLES = [
+  { key: "sales_product", label: "Product-wise Sales Forecasting" },
+  { key: "sales_revenue", label: "Revenue Forecasting" },
+  { key: "purchase_product", label: "Product-wise Purchase Forecasting" },
+  { key: "purchase_revenue", label: "Purchase Expenditure Forecasting" },
+];
+const FORECAST_FILTER_PATTERNS = [
+  {
+    key: "purchase_revenue",
+    patterns: ["\\bpurchase\\s+(expenditure|amount|cost|spend)\\b", "\\bexpenditure\\b"],
+  },
+  { key: "purchase_product", patterns: ["\\bpurchase\\b"] },
+  { key: "sales_revenue", patterns: ["\\brevenue\\b", "\\bsales?\\s+amount\\b", "\\bamount\\b"] },
+  {
+    key: "sales_product",
+    patterns: ["\\bproduct(\\s+wise)?\\b", "\\bquantity\\b", "\\bqty\\b", "\\bitems?\\b"],
+  },
+];
+
 const FILLER_PHRASES = [
   "can you show me",
   "can you give me",
@@ -1685,6 +1706,20 @@ const MODULES = {
     companyScoped: true,
     dateFilter: true,
   },
+  forecasting: {
+    label: "Sales Forecasting",
+    shortLabel: "Forecasting",
+    staticPebbles: FORECAST_PEBBLES,
+    dynamicPebbles: FORECAST_PEBBLES,
+    filterPatterns: FORECAST_FILTER_PATTERNS,
+    queryUrl: FORECAST_URL,
+    idParam: null,
+    rowsField: "rows",
+    buildTable: null, // custom-rendered in fetchModuleResult
+    dedicatedActions: {},
+    companyScoped: false, // locked to one company on the backend
+    forecast: true,
+  },
 };
 
 // Company currently "in focus" — { id, name } or null when browsing globally.
@@ -1700,6 +1735,9 @@ let lastModuleFilterKey = null;
 // list of warehouses offered in the dropdown (from the last dead-stock query).
 let currentWarehouse = "";
 let deadStockWarehouses = [];
+// Forecasting controls: granularity (monthly/yearly) and how many periods ahead.
+let currentForecastGran = "monthly";
+let currentForecastHorizon = 2;
 
 // ---------------------------------------------------------------------------
 // Company (tenant) selector — every module is scoped to exactly one
@@ -1859,6 +1897,223 @@ function buildModuleFilterBar(filterKey) {
   return html;
 }
 
+// ---------------------------------------------------------------------------
+// Sales Forecasting cards. A pebble click starts a fresh card; changing the
+// card's granularity / horizon / view updates that same card in place (no new
+// chat bubble). Each card keeps its own state keyed by id.
+// ---------------------------------------------------------------------------
+let forecastSeq = 0;
+const forecastState = {};
+const FC_COLORS = ["#17469e", "#e07a1f", "#2e9e5b", "#b5179e", "#d1495b", "#457b9d"];
+
+async function renderForecastCard(key) {
+  const id = `fc-${++forecastSeq}`;
+  const side = key.startsWith("purchase") ? "purchase" : "sales";
+  const type = key.endsWith("revenue") ? "revenue" : "product";
+  forecastState[id] = {
+    side, type, gran: "monthly", horizon: 2, view: "table", data: null,
+  };
+  const bubble = appendBotMessage("").querySelector(".bubble");
+  bubble.innerHTML = `<div class="fc-card" data-fc-id="${id}"><div class="fc-loading">Forecasting…</div></div>`;
+  await loadForecastCard(id);
+}
+
+async function loadForecastCard(id) {
+  const state = forecastState[id];
+  const card = document.querySelector(`.fc-card[data-fc-id="${id}"]`);
+  if (!state || !card) return;
+  try {
+    const params = new URLSearchParams({
+      side: state.side,
+      type: state.type,
+      granularity: state.gran,
+      horizon: String(state.horizon),
+    });
+    const res = await fetch(`${FORECAST_URL}?${params.toString()}`);
+    state.data = await res.json();
+  } catch (err) {
+    card.innerHTML = `<div class="air-empty">Couldn't load the forecast. Please try again.</div>`;
+    return;
+  }
+  renderForecastCardInner(id);
+}
+
+function renderForecastCardInner(id) {
+  const state = forecastState[id];
+  const card = document.querySelector(`.fc-card[data-fc-id="${id}"]`);
+  if (!state || !card) return;
+  const data = state.data;
+  if (!data || !data.found) {
+    card.innerHTML = `<div class="air-empty">${escapeHtml((data && data.message) || "No forecasting data available.")}</div>`;
+    return;
+  }
+  const g = state.gran;
+  const hOpts = (g === "monthly" ? [1, 2, 3, 6] : [1, 2, 3])
+    .map(
+      (n) =>
+        `<option value="${n}" ${n === state.horizon ? "selected" : ""}>${n} ${g === "monthly" ? "month" + (n === 1 ? "" : "s") : "year" + (n === 1 ? "" : "s")}</option>`,
+    )
+    .join("");
+  const content =
+    state.view === "graph"
+      ? buildForecastGraph(data)
+      : state.view === "calc"
+        ? buildForecastCalc(data)
+        : buildForecastTable(data);
+  card.innerHTML = `
+    <div class="fc-head">
+      <div class="fc-msg">${renderMarkdownLite(applyLabelOverrides(data.message))}</div>
+      <div class="fc-toggle" role="group" aria-label="View">
+        <button type="button" class="fc-toggle-btn ${state.view === "table" ? "active" : ""}" data-fc-view="table">▦ Table</button>
+        <button type="button" class="fc-toggle-btn ${state.view === "graph" ? "active" : ""}" data-fc-view="graph">📈 Graph</button>
+        <button type="button" class="fc-toggle-btn ${state.view === "calc" ? "active" : ""}" data-fc-view="calc">🧮 Calculation</button>
+      </div>
+    </div>
+    <div class="module-filter-bar active fc-filter">
+      <select class="mf-input fc-gran" aria-label="Granularity">
+        <option value="monthly" ${g === "monthly" ? "selected" : ""}>Monthly</option>
+        <option value="yearly" ${g === "yearly" ? "selected" : ""}>Yearly</option>
+      </select>
+      <span class="mf-label">ahead</span>
+      <select class="mf-input fc-horizon" aria-label="Horizon">${hOpts}</select>
+    </div>
+    <div class="fc-content">${content}</div>`;
+}
+
+function _fcNum(v) {
+  const a = Math.abs(v);
+  if (a >= 1e7) return (v / 1e7).toFixed(1) + "Cr";
+  if (a >= 1e5) return (v / 1e5).toFixed(1) + "L";
+  if (a >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return String(Math.round(v));
+}
+
+// Inline SVG line chart: past = dotted, forecast = thick solid, colour per series.
+function buildForecastGraph(data) {
+  const pastP = data.past_periods || [];
+  const futP = data.periods || [];
+  const labels = pastP.concat(futP);
+  let series;
+  if (data.type === "revenue") {
+    series = [
+      {
+        name: "Revenue",
+        past: data.past_values || [],
+        future: (data.rows || []).map((r) => r.value),
+      },
+    ];
+  } else {
+    series = (data.products || []).map((p) => ({
+      name: p.product,
+      past: p.past || [],
+      future: p.values || [],
+    }));
+  }
+  const all = [];
+  series.forEach((s) => all.push(...s.past, ...s.future));
+  if (!all.length) return `<div class="air-empty">No data to plot.</div>`;
+
+  const W = 680, H = 300, padL = 52, padR = 14, padT = 14, padB = 64;
+  const n = labels.length;
+  const maxV = Math.max(...all);
+  const minV = Math.min(0, ...all);
+  const x = (i) => padL + (n <= 1 ? 0 : (i * (W - padL - padR)) / (n - 1));
+  const y = (v) => padT + (H - padT - padB) * (1 - (v - minV) / (maxV - minV || 1));
+  const pastLen = pastP.length;
+
+  // gridlines + y labels
+  let grid = "";
+  for (let t = 0; t <= 4; t++) {
+    const gy = padT + ((H - padT - padB) * t) / 4;
+    const val = maxV - ((maxV - minV) * t) / 4;
+    grid += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" stroke="var(--border-color)" stroke-width="1"/>`;
+    grid += `<text x="${padL - 6}" y="${(gy + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--text-secondary)">${_fcNum(val)}</text>`;
+  }
+  // x labels (thin out if many)
+  const step = Math.ceil(n / 12);
+  let xlabels = "";
+  labels.forEach((lb, i) => {
+    if (i % step !== 0 && i !== n - 1) return;
+    const isFuture = i >= pastLen;
+    xlabels += `<text x="${x(i).toFixed(1)}" y="${H - padB + 16}" text-anchor="end" font-size="9" fill="${isFuture ? "var(--accent-1)" : "var(--text-secondary)"}" transform="rotate(-35 ${x(i).toFixed(1)} ${H - padB + 16})">${escapeHtml(lb)}</text>`;
+  });
+  // divider between past and forecast
+  let divider = "";
+  if (pastLen > 0 && futP.length > 0) {
+    const dx = ((x(pastLen - 1) + x(pastLen)) / 2).toFixed(1);
+    divider = `<line x1="${dx}" y1="${padT}" x2="${dx}" y2="${H - padB}" stroke="var(--border-color)" stroke-width="1" stroke-dasharray="2 3"/>`;
+  }
+
+  let lines = "";
+  series.forEach((s, si) => {
+    const color = FC_COLORS[si % FC_COLORS.length];
+    const pastPts = s.past.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+    const futPts = [];
+    if (s.past.length)
+      futPts.push(`${x(pastLen - 1).toFixed(1)},${y(s.past[s.past.length - 1]).toFixed(1)}`);
+    s.future.forEach((v, j) => futPts.push(`${x(pastLen + j).toFixed(1)},${y(v).toFixed(1)}`));
+    if (pastPts.length > 1)
+      lines += `<polyline points="${pastPts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.75"/>`;
+    if (futPts.length > 1)
+      lines += `<polyline points="${futPts.join(" ")}" fill="none" stroke="${color}" stroke-width="3"/>`;
+    // forecast point markers
+    s.future.forEach((v, j) =>
+      lines += `<circle cx="${x(pastLen + j).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="${color}"/>`,
+    );
+  });
+
+  // legend
+  let legend = `<span class="fc-leg"><span class="fc-leg-dash"></span>Past (actual)</span><span class="fc-leg"><span class="fc-leg-solid"></span>Forecast</span>`;
+  if (data.type !== "revenue" && series.length > 1) {
+    legend += series
+      .map(
+        (s, si) =>
+          `<span class="fc-leg"><span class="fc-leg-dot" style="background:${FC_COLORS[si % FC_COLORS.length]}"></span>${escapeHtml(s.name)}</span>`,
+      )
+      .join("");
+  }
+  return `
+    <div class="fc-graph-wrap">
+      <svg viewBox="0 0 ${W} ${H}" class="fc-graph" preserveAspectRatio="xMidYMid meet" role="img">
+        ${grid}${divider}${lines}${xlabels}
+      </svg>
+      <div class="fc-legend">${legend}</div>
+    </div>`;
+}
+
+function buildForecastCalc(data) {
+  const rows = (data.calc || [])
+    .map(
+      ([label, text]) =>
+        `<div class="air-math-row"><span class="air-math-lbl">${escapeHtml(label)}</span><span class="air-math-expr">${escapeHtml(text)}</span></div>`,
+    )
+    .join("");
+  return rows
+    ? `<div class="air-math">${rows}</div>`
+    : '<div class="air-empty">No calculation available.</div>';
+}
+
+function buildForecastTable(data) {
+  const periods = data.periods || [];
+  if (data.type === "revenue") {
+    const body = (data.rows || [])
+      .map(
+        (r) =>
+          `<tr><td>${escapeHtml(r.period)}</td><td>${escapeHtml(r.display)}</td></tr>`,
+      )
+      .join("");
+    return `<div class="result-card"><table class="sku-table"><thead><tr><th>Period</th><th>Forecast Revenue</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+  const head = `<tr><th>Product</th>${periods.map((p) => `<th>${escapeHtml(p)}</th>`).join("")}</tr>`;
+  const body = (data.products || [])
+    .map(
+      (p) =>
+        `<tr><td>${escapeHtml(p.product)}</td>${(p.display || []).map((v) => `<td>${escapeHtml(v)}</td>`).join("")}</tr>`,
+    )
+    .join("");
+  return `<div class="result-card"><table class="sku-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
 // Delegated handlers for the in-card filter bars (bars live in dynamically
 // added bubbles, so we listen on chatBody rather than binding each one).
 chatBody.addEventListener("click", (e) => {
@@ -1885,9 +2140,39 @@ chatBody.addEventListener("click", (e) => {
 });
 
 chatBody.addEventListener("change", (e) => {
-  if (!e.target.classList.contains("mf-warehouse")) return;
-  currentWarehouse = e.target.value;
-  runModuleQuery("dead_stock");
+  if (e.target.classList.contains("mf-warehouse")) {
+    currentWarehouse = e.target.value;
+    runModuleQuery("dead_stock");
+    return;
+  }
+  // Forecast card filters update that same card in place (no new bubble).
+  const fcCard = e.target.closest(".fc-card");
+  if (fcCard) {
+    const id = fcCard.dataset.fcId;
+    const state = forecastState[id];
+    if (!state) return;
+    if (e.target.classList.contains("fc-gran")) {
+      state.gran = e.target.value;
+      state.horizon = state.gran === "monthly" ? 2 : 1;
+      loadForecastCard(id);
+    } else if (e.target.classList.contains("fc-horizon")) {
+      state.horizon = parseInt(e.target.value, 10) || 1;
+      loadForecastCard(id);
+    }
+  }
+});
+
+// Forecast Table/Graph toggle — switches the view of that card only, no refetch.
+chatBody.addEventListener("click", (e) => {
+  const btn = e.target.closest(".fc-toggle-btn");
+  if (!btn) return;
+  const fcCard = btn.closest(".fc-card");
+  if (!fcCard) return;
+  const id = fcCard.dataset.fcId;
+  const state = forecastState[id];
+  if (!state) return;
+  state.view = btn.dataset.fcView;
+  renderForecastCardInner(id);
 });
 
 const PEBBLE_USAGE_STORAGE_KEY = "ledger-pebble-usage";
@@ -2038,6 +2323,13 @@ async function runModuleQuery(filterKey) {
   const module = MODULES[currentModuleKey];
   lastModuleFilterKey = filterKey;
 
+  // Forecasting renders a self-contained card that updates in place on filter
+  // changes; a pebble click always starts a fresh card.
+  if (module.forecast) {
+    renderForecastCard(filterKey);
+    return;
+  }
+
   if (module.comingSoon === true) {
     appendBotMessage(`🚧 <b>${escapeHtml(module.label)}</b> is coming soon.`);
     return;
@@ -2054,7 +2346,7 @@ async function runModuleQuery(filterKey) {
 
   const typingEl = showTyping();
   try {
-    let { rows, message } = await fetchModuleResult(
+    let { rows, message, html } = await fetchModuleResult(
       filterKey,
       currentLedger ? currentLedger.id : null,
     );
@@ -2071,13 +2363,16 @@ async function runModuleQuery(filterKey) {
         );
       }
     }
+    // Forecasting supplies its own `html`; standard modules use buildTable.
+    const tableHtml =
+      html !== undefined ? html : module.buildTable(rows, filterKey);
     typingEl.remove();
     withExportButton(
       appendBotMessage("").querySelector(".bubble"),
       `
       ${renderMarkdownLite(applyLabelOverrides(message))}
       ${buildModuleFilterBar(filterKey)}
-      ${module.buildTable(rows, filterKey)}
+      ${tableHtml}
     `,
       rows.length > 0,
     );
@@ -3540,6 +3835,8 @@ function openModule(moduleKey, isInitial) {
   lastModuleFilterKey = null;
   currentWarehouse = "";
   deadStockWarehouses = [];
+  currentForecastGran = "monthly";
+  currentForecastHorizon = 2;
   // Leaving the Reports dashboard — restore the chat view + composer.
   if (reportsView) reportsView.style.display = "none";
   chatBody.style.display = "";

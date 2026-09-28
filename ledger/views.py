@@ -2676,6 +2676,330 @@ def report_supplier_allocation_api(request):
     })
 
 
+# ---------------------------------------------------------------------------
+# Sales Forecasting — locked to Testing_Plastic_comp (3+ years of monthly data).
+# Two modes: product-wise quantity, and revenue (₹). Granularity monthly or
+# yearly (Indian fiscal year, Apr–Mar). Forecasts come from OpenAI when a key is
+# configured; a deterministic seasonal+growth model is the fallback so the
+# feature always returns numbers.
+# ---------------------------------------------------------------------------
+
+FORECAST_COMPANY_ID = '548'  # Testing_Plastic_comp — the only company enabled for now
+FORECAST_TOP_PRODUCTS = 6
+
+
+def _add_months(y, m, k):
+    idx = (y * 12 + (m - 1)) + k
+    return idx // 12, idx % 12 + 1
+
+
+def _month_label(y, m):
+    return date(y, m, 1).strftime('%b-%y')  # e.g. Oct-26
+
+
+def _fy_start(y, m):
+    """Indian fiscal year start year for a given calendar month."""
+    return y if m >= 4 else y - 1
+
+
+def _fy_label(fy):
+    return f"FY {fy}-{str(fy + 1)[-2:]}"  # e.g. FY 2026-27
+
+
+def _inr_short(v):
+    v = float(v or 0)
+    if abs(v) >= 1e7:
+        return f"₹{v / 1e7:.2f} Cr"
+    if abs(v) >= 1e5:
+        return f"₹{v / 1e5:.2f} L"
+    return f"₹{v:,.0f}"
+
+
+def _grp_in(n):
+    """Indian digit grouping for a plain number (no currency symbol)."""
+    s = _inr(n)
+    return s.replace('₹', '').split('.')[0]
+
+
+def _forecast_series_data(company_id, doc_type='Invoice'):
+    """Monthly amount {(y,m): amount} and per-product monthly qty
+    {product: {(y,m): qty}} from invoice lines of the given doc_type
+    ('Invoice' = sales, 'Purchase Invoice' = purchase)."""
+    lines = InvoiceData.objects.filter(
+        doc_type=doc_type, Invoice_data__Seller_data=str(company_id)
+    ).values_list('Products', 'Amount', 'quantity', 'Invoice_data__Invoice_date')
+    revenue = defaultdict(float)
+    product = defaultdict(lambda: defaultdict(float))
+    totals = defaultdict(float)
+    for name, amount, qty, idate in lines:
+        if not idate:
+            continue
+        ym = (idate.year, idate.month)
+        revenue[ym] += _to_number(amount) or 0.0
+        pname = (name or '').strip()
+        if pname:
+            q = _to_number(qty) or 0.0
+            product[pname][ym] += q
+            totals[pname] += q
+    return revenue, product, totals
+
+
+def _series_growth(series):
+    """Year-over-year growth = last 12 periods total / previous 12 periods total.
+    Returns (growth, last12_total, prev12_total)."""
+    vals = [series[k] for k in sorted(series)]
+    if len(vals) >= 24 and sum(vals[-24:-12]) > 0:
+        cur, prev = sum(vals[-12:]), sum(vals[-24:-12])
+        return min(max(cur / prev, 0.5), 2.0), cur, prev
+    return 1.0, (sum(vals[-12:]) if vals else 0.0), 0.0
+
+
+def _stat_forecast(series, future_keys):
+    """Seasonal-with-growth fallback: each future month = the same calendar month
+    a year earlier (actual or already-forecast) scaled by recent YoY growth."""
+    past = sorted(series)
+    vals = [series[k] for k in past]
+    growth = 1.0
+    if len(vals) >= 24 and sum(vals[-24:-12]) > 0:
+        growth = min(max(sum(vals[-12:]) / sum(vals[-24:-12]), 0.5), 2.0)
+    recent = (sum(vals[-3:]) / len(vals[-3:])) if vals else 0.0
+    out = {}
+    combined = dict(series)
+    for (y, m) in future_keys:
+        base = combined.get((y - 1, m))
+        if base is None:
+            base = recent
+        val = max(base * growth, 0.0)
+        out[(y, m)] = val
+        combined[(y, m)] = val
+    return out
+
+
+def _openai_forecast(series_map, past_keys, future_keys):
+    """Ask OpenAI to forecast each named series over future_keys. Returns
+    {name: {(y,m): value}} or None if unavailable/unparseable."""
+    api_key = getattr(settings, 'OPENAI_API_KEY', '')
+    if not api_key:
+        return None
+    past_labels = [_month_label(*k) for k in past_keys]
+    future_labels = [_month_label(*k) for k in future_keys]
+    hist = {name: {_month_label(*k): round(series.get(k, 0.0))
+                   for k in past_keys}
+            for name, series in series_map.items()}
+    system = (
+        "You are a demand-forecasting engine. Given monthly historical values, "
+        "forecast the requested future months using trend and seasonality. "
+        "Return ONLY JSON of the form "
+        '{"<series name>": {"<Mon-YY>": <number>, ...}, ...} with a value for '
+        "every requested future month and every series. Numbers only, no text."
+    )
+    user = (
+        f"History (last {len(past_labels)} months): {json.dumps(hist)}\n"
+        f"Forecast these future months for every series: {future_labels}"
+    )
+    body = json.dumps({
+        'model': getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini'),
+        'messages': [
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': user},
+        ],
+        'temperature': 0.2,
+        'response_format': {'type': 'json_object'},
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        OPENAI_URL, data=body,
+        headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        parsed = json.loads(data['choices'][0]['message']['content'])
+    except (urllib.error.URLError, KeyError, ValueError, TimeoutError):
+        return None
+    label_to_key = {_month_label(*k): k for k in future_keys}
+    out = {}
+    for name in series_map:
+        per = parsed.get(name) or {}
+        if not isinstance(per, dict):
+            return None
+        out[name] = {}
+        for lbl, key in label_to_key.items():
+            v = _to_number(per.get(lbl))
+            out[name][key] = max(v, 0.0) if v is not None else None
+    return out
+
+
+def forecast_api(request):
+    ftype = request.GET.get('type', 'revenue')
+    if ftype not in ('revenue', 'product'):
+        ftype = 'revenue'
+    side = request.GET.get('side', 'sales')
+    if side not in ('sales', 'purchase'):
+        side = 'sales'
+    doc_type = 'Purchase Invoice' if side == 'purchase' else 'Invoice'
+    granularity = request.GET.get('granularity', 'monthly')
+    if granularity not in ('monthly', 'yearly'):
+        granularity = 'monthly'
+    try:
+        horizon = max(1, min(int(request.GET.get('horizon', 2)), 6))
+    except (TypeError, ValueError):
+        horizon = 2
+
+    # Titles by side + measure.
+    if side == 'purchase':
+        title = 'Purchase Expenditure Forecast' if ftype == 'revenue' else 'Product-wise Purchase Forecast'
+    else:
+        title = 'Revenue Forecast' if ftype == 'revenue' else 'Product-wise Sales Forecast'
+
+    company_id = FORECAST_COMPANY_ID
+    company_name = companydata.objects.filter(
+        pk=company_id).values_list('comp_name', flat=True).first()
+
+    revenue, product, totals = _forecast_series_data(company_id, doc_type=doc_type)
+    if not revenue:
+        return JsonResponse({'found': False, 'company_name': company_name})
+
+    last_y, last_m = max(revenue)
+
+    # Which future MONTHS must be forecast (yearly still forecasts monthly, then
+    # aggregates to the fiscal year).
+    if granularity == 'monthly':
+        future_months = [_add_months(last_y, last_m, i + 1) for i in range(horizon)]
+        target_fys = []
+    else:
+        first_fy = _fy_start(last_y, last_m)
+        target_fys = [first_fy + i for i in range(horizon)]
+        end_y, end_m = target_fys[-1] + 1, 3  # last FY ends in March
+        future_months = []
+        yy, mm = _add_months(last_y, last_m, 1)
+        while (yy, mm) <= (end_y, end_m):
+            future_months.append((yy, mm))
+            yy, mm = _add_months(yy, mm, 1)
+
+    # Series to forecast.
+    if ftype == 'revenue':
+        series_map = {'revenue': dict(revenue)}
+    else:
+        top = [p for p, _ in sorted(totals.items(), key=lambda x: x[1], reverse=True)[:FORECAST_TOP_PRODUCTS]]
+        series_map = {p: dict(product[p]) for p in top}
+
+    past_keys = sorted(revenue)[-36:]  # cap history sent to the model
+    ai = _openai_forecast(series_map, past_keys, future_months)
+    used_ai = ai is not None
+
+    forecasts = {}  # name -> {(y,m): value}
+    for name, series in series_map.items():
+        fc = ai.get(name) if ai else None
+        if not fc or any(v is None for v in fc.values()):
+            fc = _stat_forecast(series, future_months)
+        forecasts[name] = fc
+
+    def month_value(name, key):
+        # actuals where known, forecast where not (needed for FY aggregation).
+        return series_map[name].get(key, forecasts[name].get(key, 0.0))
+
+    scope = f" for **{company_name}**" if company_name else ''
+    is_money = ftype == 'revenue'
+    vfmt = _inr_short if is_money else (lambda v: f"{_grp_in(v)} units")
+    method_text = (
+        'AI model (OpenAI) — learns trend & seasonality from the monthly history.'
+        if used_ai else
+        'Statistical — each future period = the same period a year earlier × year-over-year growth.'
+    )
+
+    def fy_sum(name, fy):
+        s = 0.0
+        yy, mm = fy, 4
+        for _ in range(12):
+            s += month_value(name, (yy, mm))
+            yy, mm = _add_months(yy, mm, 1)
+        return s
+
+    if granularity == 'monthly':
+        periods = [_month_label(*k) for k in future_months]
+        hist_keys = sorted(revenue)[-12:]
+        past_periods = [_month_label(*k) for k in hist_keys]
+
+        # Calculation trail (based on the primary series shown).
+        calc_name = 'revenue' if is_money else next(iter(series_map))
+        g, cur, prev = _series_growth(series_map[calc_name])
+        calc = [['Method', method_text],
+                ['History used', f"{len(past_keys)} months up to {_month_label(last_y, last_m)}"]]
+        if prev > 0:
+            calc.append([f"Year-over-year growth{'' if is_money else ' (' + calc_name + ')'}",
+                         f"{vfmt(cur)} (last 12 mo) ÷ {vfmt(prev)} (previous 12 mo) = {g:.2f}×"])
+        if used_ai:
+            calc.append(['Note', 'Values are produced by the AI model; the growth figure is shown for reference.'])
+        else:
+            for k in future_months:
+                py = (k[0] - 1, k[1])
+                base = series_map[calc_name].get(py, forecasts[calc_name].get(py, 0.0))
+                calc.append([f"{_month_label(*k)}" + ('' if is_money else f" · {calc_name}"),
+                             f"baseline {vfmt(base)} ({_month_label(*py)}) × {g:.2f} = {vfmt(forecasts[calc_name][k])}"])
+            if not is_money:
+                calc.append(['Other products', 'Each product uses the same method on its own history.'])
+
+        if is_money:
+            rows = [{'period': _month_label(*k), 'value': round(forecasts['revenue'][k]),
+                     'display': _inr_short(forecasts['revenue'][k])} for k in future_months]
+            past_values = [round(revenue.get(k, 0.0)) for k in hist_keys]
+            total = sum(r['value'] for r in rows)
+            message = (f"**{title}**{scope} — next {horizon} month(s), "
+                       f"{_inr_short(total)} total.")
+            return JsonResponse({'found': True, 'type': ftype, 'side': side, 'granularity': granularity,
+                                 'company_name': company_name, 'periods': periods, 'rows': rows,
+                                 'past_periods': past_periods, 'past_values': past_values,
+                                 'calc': calc, 'message': message})
+        products_out = [{
+            'product': name,
+            'values': [round(forecasts[name][k]) for k in future_months],
+            'display': [_grp_in(forecasts[name][k]) for k in future_months],
+            'past': [round(series_map[name].get(k, 0.0)) for k in hist_keys],
+        } for name in series_map]
+        message = (f"**{title}**{scope} — next {horizon} month(s) "
+                   f"for {len(products_out)} product(s).")
+        return JsonResponse({'found': True, 'type': ftype, 'side': side, 'granularity': granularity,
+                             'company_name': company_name, 'periods': periods, 'products': products_out,
+                             'past_periods': past_periods, 'calc': calc, 'message': message})
+
+    # Yearly: aggregate months into fiscal years.
+    periods = [_fy_label(fy) for fy in target_fys]
+    hist_fys = [target_fys[0] - i for i in range(3, 0, -1)]
+    past_periods = [_fy_label(fy) for fy in hist_fys]
+
+    calc_name = 'revenue' if is_money else next(iter(series_map))
+    g, cur, prev = _series_growth(series_map[calc_name])
+    calc = [['Method', method_text],
+            ['Fiscal year', 'Indian FY (Apr–Mar). FY total = sum of its 12 monthly values (actual + forecast).']]
+    if prev > 0:
+        calc.append([f"Year-over-year growth{'' if is_money else ' (' + calc_name + ')'}",
+                     f"{vfmt(cur)} (last 12 mo) ÷ {vfmt(prev)} (previous 12 mo) = {g:.2f}×"])
+    for fy in target_fys:
+        calc.append([_fy_label(fy) + ('' if is_money else f" · {calc_name}"),
+                     f"sum of Apr {fy} – Mar {fy + 1} monthly values = {vfmt(fy_sum(calc_name, fy))}"])
+
+    if is_money:
+        rows = [{'period': _fy_label(fy), 'value': round(fy_sum('revenue', fy)),
+                 'display': _inr_short(fy_sum('revenue', fy))} for fy in target_fys]
+        past_values = [round(fy_sum('revenue', fy)) for fy in hist_fys]
+        message = f"**{title}**{scope} — {', '.join(periods)}."
+        return JsonResponse({'found': True, 'type': ftype, 'side': side, 'granularity': granularity,
+                             'company_name': company_name, 'periods': periods, 'rows': rows,
+                             'past_periods': past_periods, 'past_values': past_values,
+                             'calc': calc, 'message': message})
+    products_out = [{
+        'product': name,
+        'values': [round(fy_sum(name, fy)) for fy in target_fys],
+        'display': [_grp_in(fy_sum(name, fy)) for fy in target_fys],
+        'past': [round(fy_sum(name, fy)) for fy in hist_fys],
+    } for name in series_map]
+    message = (f"**{title}**{scope} — {', '.join(periods)} "
+               f"for {len(products_out)} product(s).")
+    return JsonResponse({'found': True, 'type': ftype, 'side': side, 'granularity': granularity,
+                         'company_name': company_name, 'periods': periods, 'products': products_out,
+                         'past_periods': past_periods, 'calc': calc, 'message': message})
+
+
 OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 

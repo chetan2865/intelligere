@@ -27,5 +27,6 @@ urlpatterns = [
     path('api/report/purchase-timing/', views.report_purchase_timing_api, name='report_purchase_timing_api'),
     path('api/report/open-po/', views.report_open_po_api, name='report_open_po_api'),
     path('api/report/supplier-allocation/', views.report_supplier_allocation_api, name='report_supplier_allocation_api'),
+    path('api/forecast/', views.forecast_api, name='forecast_api'),
     path('api/export-pdf/', views.export_pdf_api, name='export_pdf_api'),
 ]
