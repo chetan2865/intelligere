@@ -1923,12 +1923,9 @@ async function loadForecastCard(id) {
   const card = document.querySelector(`.fc-card[data-fc-id="${id}"]`);
   if (!state || !card) return;
   try {
-    const params = new URLSearchParams({
-      side: state.side,
-      type: state.type,
-      granularity: state.gran,
-      horizon: String(state.horizon),
-    });
+    // Fetch the full forecast superset ONCE (side + measure). Granularity,
+    // horizon and view are then applied client-side with no further requests.
+    const params = new URLSearchParams({ side: state.side, type: state.type });
     const res = await fetch(`${FORECAST_URL}?${params.toString()}`);
     state.data = await res.json();
   } catch (err) {
@@ -1947,6 +1944,8 @@ function renderForecastCardInner(id) {
     card.innerHTML = `<div class="air-empty">${escapeHtml((data && data.message) || "No forecasting data available.")}</div>`;
     return;
   }
+  // Slice the cached superset to the current granularity/horizon (instant).
+  const sliced = fcSlice(state);
   const g = state.gran;
   const hOpts = (g === "monthly" ? [1, 2, 3, 6] : [1, 2, 3])
     .map(
@@ -1956,13 +1955,13 @@ function renderForecastCardInner(id) {
     .join("");
   const content =
     state.view === "graph"
-      ? buildForecastGraph(data)
+      ? buildForecastGraph(sliced)
       : state.view === "calc"
-        ? buildForecastCalc(data)
-        : buildForecastTable(data);
+        ? buildForecastCalc(sliced)
+        : buildForecastTable(sliced);
   card.innerHTML = `
     <div class="fc-head">
-      <div class="fc-msg">${renderMarkdownLite(applyLabelOverrides(data.message))}</div>
+      <div class="fc-msg">${renderMarkdownLite(applyLabelOverrides(sliced.message))}</div>
       <div class="fc-toggle" role="group" aria-label="View">
         <button type="button" class="fc-toggle-btn ${state.view === "table" ? "active" : ""}" data-fc-view="table">▦ Table</button>
         <button type="button" class="fc-toggle-btn ${state.view === "graph" ? "active" : ""}" data-fc-view="graph">📈 Graph</button>
@@ -1986,6 +1985,166 @@ function _fcNum(v) {
   if (a >= 1e5) return (v / 1e5).toFixed(1) + "L";
   if (a >= 1e3) return (v / 1e3).toFixed(1) + "K";
   return String(Math.round(v));
+}
+
+// --- client-side slicing of the cached forecast superset ---
+const FC_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function fcGroupIndian(n) {
+  n = Math.round(n);
+  const neg = n < 0;
+  let s = Math.abs(n).toString();
+  let last3 = s.slice(-3);
+  let rest = s.slice(0, -3);
+  if (rest) last3 = "," + last3;
+  rest = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ",");
+  return (neg ? "-" : "") + rest + last3;
+}
+function fcMoney(v) {
+  v = +v || 0;
+  const a = Math.abs(v);
+  if (a >= 1e7) return "₹" + (v / 1e7).toFixed(2) + " Cr";
+  if (a >= 1e5) return "₹" + (v / 1e5).toFixed(2) + " L";
+  return "₹" + fcGroupIndian(v);
+}
+function fcLabelYM(y, m) {
+  return FC_MON[m - 1] + "-" + String(y).slice(-2);
+}
+function fcCombinedMap(series) {
+  const map = {};
+  (series.history || []).forEach((p) => (map[p.y + "-" + p.m] = p.v));
+  (series.forecast || []).forEach((p) => (map[p.y + "-" + p.m] = p.v));
+  return map;
+}
+function fcFyStart(y, m) {
+  return m >= 4 ? y : y - 1;
+}
+function fcFyLabel(fy) {
+  return "FY " + fy + "-" + String(fy + 1).slice(-2);
+}
+function fcFySum(map, fy) {
+  let s = 0;
+  for (let mm = 4; mm <= 12; mm++) s += map[fy + "-" + mm] || 0;
+  for (let mm = 1; mm <= 3; mm++) s += map[fy + 1 + "-" + mm] || 0;
+  return s;
+}
+
+// Turn the cached superset (state.data) into the shape the table/graph/calc
+// builders expect, for the current granularity + horizon.
+function fcSlice(state) {
+  const d = state.data;
+  const isMoney = d.is_money;
+  const series = d.series || [];
+  const horizon = state.horizon;
+  const type = d.type;
+  const company = d.company_name;
+  const fmt = (v) => (isMoney ? fcMoney(v) : fcGroupIndian(v));
+  const prim = series[0];
+  const growth = prim ? prim.growth : 1;
+  // YoY sums for the calc trail, from the primary series history.
+  const hv = (prim ? prim.history : []).map((p) => p.v);
+  const cur = hv.slice(-12).reduce((a, b) => a + b, 0);
+  const prev = hv.slice(-24, -12).reduce((a, b) => a + b, 0);
+  const isAI = (d.engine || "").indexOf("AI") === 0;
+
+  if (state.gran === "monthly") {
+    const periods = prim.forecast.slice(0, horizon).map((p) => p.l);
+    const past_periods = prim.history.slice(-12).map((p) => p.l);
+    const calc = [
+      ["Method", d.method],
+      ["History used", `${prim.history.length} months up to ${prim.history[prim.history.length - 1].l}`],
+    ];
+    if (prev > 0)
+      calc.push([
+        "Year-over-year growth" + (isMoney ? "" : ` (${prim.name})`),
+        `${fmt(cur)} (last 12 mo) ÷ ${fmt(prev)} (previous 12 mo) = ${growth.toFixed(2)}×`,
+      ]);
+    if (isAI) {
+      calc.push(["Note", "Values are produced by the AI model; growth shown for reference."]);
+    } else {
+      const map = fcCombinedMap(prim);
+      prim.forecast.slice(0, horizon).forEach((p) => {
+        const base = map[p.y - 1 + "-" + p.m] || 0;
+        calc.push([
+          p.l + (isMoney ? "" : ` · ${prim.name}`),
+          `baseline ${fmt(base)} (${fcLabelYM(p.y - 1, p.m)}) × ${growth.toFixed(2)} = ${fmt(p.v)}`,
+        ]);
+      });
+      if (!isMoney)
+        calc.push(["Other products", "Each product uses the same method on its own history."]);
+    }
+    if (isMoney) {
+      const rows = prim.forecast.slice(0, horizon).map((p) => ({
+        period: p.l, value: p.v, display: fcMoney(p.v),
+      }));
+      const total = rows.reduce((a, r) => a + r.value, 0);
+      return {
+        type, periods, past_periods,
+        past_values: prim.history.slice(-12).map((p) => p.v),
+        rows, calc,
+        message: `**${d.title}** for **${company}** — next ${horizon} month(s), ${fcMoney(total)} total.`,
+      };
+    }
+    const products = series.map((s) => ({
+      product: s.name,
+      values: s.forecast.slice(0, horizon).map((p) => p.v),
+      display: s.forecast.slice(0, horizon).map((p) => fcGroupIndian(p.v)),
+      past: s.history.slice(-12).map((p) => p.v),
+    }));
+    return {
+      type, periods, past_periods, products, calc,
+      message: `**${d.title}** for **${company}** — next ${horizon} month(s) for ${products.length} product(s).`,
+    };
+  }
+
+  // Yearly
+  const lastH = prim.history[prim.history.length - 1];
+  const firstFY = fcFyStart(lastH.y, lastH.m);
+  const targetFYs = [];
+  for (let i = 0; i < horizon; i++) targetFYs.push(firstFY + i);
+  const pastFYs = [firstFY - 3, firstFY - 2, firstFY - 1];
+  const periods = targetFYs.map(fcFyLabel);
+  const past_periods = pastFYs.map(fcFyLabel);
+  const pmap = fcCombinedMap(prim);
+  const calc = [
+    ["Method", d.method],
+    ["Fiscal year", "Indian FY (Apr–Mar). FY total = sum of its 12 monthly values (actual + forecast)."],
+  ];
+  if (prev > 0)
+    calc.push([
+      "Year-over-year growth" + (isMoney ? "" : ` (${prim.name})`),
+      `${fmt(cur)} (last 12 mo) ÷ ${fmt(prev)} (previous 12 mo) = ${growth.toFixed(2)}×`,
+    ]);
+  targetFYs.forEach((fy) =>
+    calc.push([
+      fcFyLabel(fy) + (isMoney ? "" : ` · ${prim.name}`),
+      `sum of Apr ${fy} – Mar ${fy + 1} monthly values = ${fmt(fcFySum(pmap, fy))}`,
+    ]),
+  );
+  if (isMoney) {
+    const rows = targetFYs.map((fy) => {
+      const v = Math.round(fcFySum(pmap, fy));
+      return { period: fcFyLabel(fy), value: v, display: fcMoney(v) };
+    });
+    return {
+      type, periods, past_periods,
+      past_values: pastFYs.map((fy) => Math.round(fcFySum(pmap, fy))),
+      rows, calc,
+      message: `**${d.title}** for **${company}** — ${periods.join(", ")}.`,
+    };
+  }
+  const products = series.map((s) => {
+    const map = fcCombinedMap(s);
+    return {
+      product: s.name,
+      values: targetFYs.map((fy) => Math.round(fcFySum(map, fy))),
+      display: targetFYs.map((fy) => fcGroupIndian(fcFySum(map, fy))),
+      past: pastFYs.map((fy) => Math.round(fcFySum(map, fy))),
+    };
+  });
+  return {
+    type, periods, past_periods, products, calc,
+    message: `**${d.title}** for **${company}** — ${periods.join(", ")} for ${products.length} product(s).`,
+  };
 }
 
 // Inline SVG line chart: past = dotted, forecast = thick solid, colour per series.
@@ -2151,13 +2310,14 @@ chatBody.addEventListener("change", (e) => {
     const id = fcCard.dataset.fcId;
     const state = forecastState[id];
     if (!state) return;
+    // No refetch — the superset is cached; just re-slice and re-render.
     if (e.target.classList.contains("fc-gran")) {
       state.gran = e.target.value;
       state.horizon = state.gran === "monthly" ? 2 : 1;
-      loadForecastCard(id);
+      renderForecastCardInner(id);
     } else if (e.target.classList.contains("fc-horizon")) {
       state.horizon = parseInt(e.target.value, 10) || 1;
-      loadForecastCard(id);
+      renderForecastCardInner(id);
     }
   }
 });
