@@ -36,7 +36,7 @@ function resetAppToDefaultState() {
     .forEach((b) => b.classList.remove("active"));
 
   if (chatTitle) {
-    chatTitle.innerText = "Intelligere";
+    chatTitle.innerText = "Intelligere Copilot";
   }
 
   if (reportsView) reportsView.style.display = "none";
@@ -46,7 +46,7 @@ function resetAppToDefaultState() {
   renderPebbleDock([], null);
 
   appendBotMessage(
-    "👋 Hi! I'm your <b>Intelligere AI Assistant</b>. Please select a module from the sidebar to get started.",
+    "👋 Hi! I'm your <b>Intelligere Copilot</b>. Please select a module from the sidebar to get started.",
   );
 }
 
@@ -103,7 +103,9 @@ window.addEventListener("resize", updateInputWrapperHeight);
 document.addEventListener("DOMContentLoaded", updateInputWrapperHeight);
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".air-pills-drop")) {
-    document.querySelectorAll(".air-pills-drop.open").forEach((d) => d.classList.remove("open"));
+    document
+      .querySelectorAll(".air-pills-drop.open")
+      .forEach((d) => d.classList.remove("open"));
   }
 });
 function escapeHtml(str) {
@@ -1492,21 +1494,32 @@ const INVENTORY_FILTER_PATTERNS = [
 // Sales Forecasting module (locked to one company on the backend). Keys encode
 // side (sales/purchase) + measure (product qty / revenue-or-expenditure).
 const FORECAST_PEBBLES = [
-  { key: "sales_product", label: "Product-wise Sales Forecasting" },
-  { key: "sales_revenue", label: "Revenue Forecasting" },
-  { key: "purchase_product", label: "Product-wise Purchase Forecasting" },
-  { key: "purchase_revenue", label: "Purchase Expenditure Forecasting" },
+  { key: "sales_product", label: "Product-wise Sales" },
+  { key: "sales_revenue", label: "Sales Revenue" },
+  { key: "purchase_product", label: "Product-wise Purchase" },
+  { key: "purchase_revenue", label: "Purchase Expenditure" },
 ];
 const FORECAST_FILTER_PATTERNS = [
   {
     key: "purchase_revenue",
-    patterns: ["\\bpurchase\\s+(expenditure|amount|cost|spend)\\b", "\\bexpenditure\\b"],
+    patterns: [
+      "\\bpurchase\\s+(expenditure|amount|cost|spend)\\b",
+      "\\bexpenditure\\b",
+    ],
   },
   { key: "purchase_product", patterns: ["\\bpurchase\\b"] },
-  { key: "sales_revenue", patterns: ["\\brevenue\\b", "\\bsales?\\s+amount\\b", "\\bamount\\b"] },
+  {
+    key: "sales_revenue",
+    patterns: ["\\brevenue\\b", "\\bsales?\\s+amount\\b", "\\bamount\\b"],
+  },
   {
     key: "sales_product",
-    patterns: ["\\bproduct(\\s+wise)?\\b", "\\bquantity\\b", "\\bqty\\b", "\\bitems?\\b"],
+    patterns: [
+      "\\bproduct(\\s+wise)?\\b",
+      "\\bquantity\\b",
+      "\\bqty\\b",
+      "\\bitems?\\b",
+    ],
   },
 ];
 
@@ -1707,7 +1720,7 @@ const MODULES = {
     dateFilter: true,
   },
   forecasting: {
-    label: "Sales Forecasting",
+    label: "Forecasting",
     shortLabel: "Forecasting",
     staticPebbles: FORECAST_PEBBLES,
     dynamicPebbles: FORECAST_PEBBLES,
@@ -1904,14 +1917,26 @@ function buildModuleFilterBar(filterKey) {
 // ---------------------------------------------------------------------------
 let forecastSeq = 0;
 const forecastState = {};
-const FC_COLORS = ["#17469e", "#e07a1f", "#2e9e5b", "#b5179e", "#d1495b", "#457b9d"];
+const FC_COLORS = [
+  "#17469e",
+  "#e07a1f",
+  "#2e9e5b",
+  "#b5179e",
+  "#d1495b",
+  "#457b9d",
+];
 
 async function renderForecastCard(key) {
   const id = `fc-${++forecastSeq}`;
   const side = key.startsWith("purchase") ? "purchase" : "sales";
   const type = key.endsWith("revenue") ? "revenue" : "product";
   forecastState[id] = {
-    side, type, gran: "monthly", horizon: 2, view: "table", data: null,
+    side,
+    type,
+    gran: "monthly",
+    horizon: 2,
+    view: "table",
+    data: null,
   };
   const bubble = appendBotMessage("").querySelector(".bubble");
   bubble.innerHTML = `<div class="fc-card" data-fc-id="${id}"><div class="fc-loading">Forecasting…</div></div>`;
@@ -1955,7 +1980,9 @@ function renderForecastCardInner(id) {
     )
     .join("");
   const content =
-    state.view === "graph" ? buildForecastGraph(data) : buildForecastTable(data);
+    state.view === "graph"
+      ? buildForecastGraph(data)
+      : buildForecastTable(data);
   card.innerHTML = `
     <div class="fc-head">
       <div class="fc-msg">${renderMarkdownLite(applyLabelOverrides(data.message))}</div>
@@ -2008,12 +2035,18 @@ function buildForecastGraph(data) {
   series.forEach((s) => all.push(...s.past, ...s.future));
   if (!all.length) return `<div class="air-empty">No data to plot.</div>`;
 
-  const W = 680, H = 300, padL = 52, padR = 14, padT = 14, padB = 64;
+  const W = 680,
+    H = 300,
+    padL = 52,
+    padR = 14,
+    padT = 14,
+    padB = 64;
   const n = labels.length;
   const maxV = Math.max(...all);
   const minV = Math.min(0, ...all);
   const x = (i) => padL + (n <= 1 ? 0 : (i * (W - padL - padR)) / (n - 1));
-  const y = (v) => padT + (H - padT - padB) * (1 - (v - minV) / (maxV - minV || 1));
+  const y = (v) =>
+    padT + (H - padT - padB) * (1 - (v - minV) / (maxV - minV || 1));
   const pastLen = pastP.length;
 
   // gridlines + y labels
@@ -2042,18 +2075,25 @@ function buildForecastGraph(data) {
   let lines = "";
   series.forEach((s, si) => {
     const color = FC_COLORS[si % FC_COLORS.length];
-    const pastPts = s.past.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+    const pastPts = s.past.map(
+      (v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`,
+    );
     const futPts = [];
     if (s.past.length)
-      futPts.push(`${x(pastLen - 1).toFixed(1)},${y(s.past[s.past.length - 1]).toFixed(1)}`);
-    s.future.forEach((v, j) => futPts.push(`${x(pastLen + j).toFixed(1)},${y(v).toFixed(1)}`));
+      futPts.push(
+        `${x(pastLen - 1).toFixed(1)},${y(s.past[s.past.length - 1]).toFixed(1)}`,
+      );
+    s.future.forEach((v, j) =>
+      futPts.push(`${x(pastLen + j).toFixed(1)},${y(v).toFixed(1)}`),
+    );
     if (pastPts.length > 1)
       lines += `<polyline points="${pastPts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.75"/>`;
     if (futPts.length > 1)
       lines += `<polyline points="${futPts.join(" ")}" fill="none" stroke="${color}" stroke-width="3"/>`;
     // forecast point markers
-    s.future.forEach((v, j) =>
-      lines += `<circle cx="${x(pastLen + j).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="${color}"/>`,
+    s.future.forEach(
+      (v, j) =>
+        (lines += `<circle cx="${x(pastLen + j).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="${color}"/>`),
     );
   });
 
@@ -2107,7 +2147,9 @@ chatBody.addEventListener("click", (e) => {
     const from = bar.querySelector(".mf-from").value;
     const to = bar.querySelector(".mf-to").value;
     if (from && to && from > to) {
-      appendBotMessage("The <b>From</b> date can't be after the <b>To</b> date.");
+      appendBotMessage(
+        "The <b>From</b> date can't be after the <b>To</b> date.",
+      );
       return;
     }
     if (!from && !to) {
@@ -2270,7 +2312,11 @@ async function fetchModuleResult(filterKey, ledgerId) {
     if (currentDateRange.to) params.set("to", currentDateRange.to);
   }
   // Dead Stock warehouse-wise filter.
-  if (currentModuleKey === "inventory" && filterKey === "dead_stock" && currentWarehouse) {
+  if (
+    currentModuleKey === "inventory" &&
+    filterKey === "dead_stock" &&
+    currentWarehouse
+  ) {
     params.set("warehouse", currentWarehouse);
   }
 
@@ -2288,7 +2334,10 @@ async function fetchModuleResult(filterKey, ledgerId) {
     rows = rows.filter((r) => r.type === module.voucherType);
     // High Value = this module's own top 2 outstanding by amount.
     if (filterKey === "high_value") {
-      rows = rows.slice().sort((a, b) => b.amount - a.amount).slice(0, 2);
+      rows = rows
+        .slice()
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 2);
     }
     const total = rows.reduce((sum, r) => sum + r.amount, 0);
     const label =
@@ -3139,11 +3188,12 @@ function renderReportsView() {
       </span>`;
     const isWide = r.dynamic && r.dynamic.layout === "wide";
     const locked = !r.dynamic; // only reports 4/5/6 (dynamic) are active
+    const widePillsHtml = isWide ? renderWidePills(r.dynamic.wideKind) : "";
     const header = isWide
       ? `<div class="air-acc-header air-acc-header-wide">
           <span class="air-acc-toggle air-acc-titlewrap">${titleInner}</span>
           <div class="air-wide-live" id="wideHead-${i}"></div>
-          <span class="air-wide-options" id="wideOptions-${i}"></span>
+          <span class="air-wide-options" id="wideOptions-${i}">${widePillsHtml}</span>
           <span class="air-acc-toggle air-idx-chevron">▾</span>
         </div>`
       : `<button type="button" class="air-acc-header">${titleInner}<span class="air-idx-chevron">${locked ? "🔒" : "▾"}</span></button>`;
@@ -3181,14 +3231,15 @@ function expandAllReports() {
 // Fill an accordion slot with its card (static: render now; dynamic: fetch live).
 function fillReportCard(i) {
   const slot = document.getElementById(`accCard-${i}`);
-  if (!slot || slot.dataset.loaded) return;
+  if (!slot || slot.dataset.loaded) return Promise.resolve();
   const r = AIR_REPORTS[i];
   slot.dataset.loaded = "1";
   if (r.dynamic) {
     slot.innerHTML = `<div class="air-loading">Loading live data…</div>`;
-    loadDynamicReport(i, slot);
+    return loadDynamicReport(i, slot);
   } else {
     slot.innerHTML = renderAirCard(r);
+    return Promise.resolve();
   }
 }
 
@@ -3321,20 +3372,21 @@ function renderDynReport(data) {
 // accordion header (same row as the title); the pills + panels + Contact button
 // render in the body.
 function renderWidePills(data) {
+  const kind = typeof data === "string" ? data : data?._wideKind || "customer";
   const pill = (key, label) =>
     `<button type="button" class="air-tab air-pill" data-tab="${key}">${label}</button>`;
   let items;
-  if (data._wideKind === "product") {
+  if (kind === "product") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("detail", "Product Detail")}${pill("similar", "Similar Result")}`;
-  } else if (data._wideKind === "supplier") {
+  } else if (kind === "supplier") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("invoices", "Invoices")}${pill("similar", "Similar Result")}`;
-  } else if (data._wideKind === "delivery") {
+  } else if (kind === "delivery") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("deliveries", "Deliveries")}${pill("similar", "Similar Result")}`;
-  } else if (data._wideKind === "stock_transfer") {
+  } else if (kind === "stock_transfer") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("warehouses", "Warehouses")}${pill("similar", "Other Products")}`;
-  } else if (data._wideKind === "purchase" || data._wideKind === "allocation") {
+  } else if (kind === "purchase" || kind === "allocation") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("detail", "Details")}${pill("calc", "🧮 Calculation")}${pill("similar", "Similar Result")}`;
-  } else if (data._wideKind === "invoice") {
+  } else if (kind === "invoice") {
     items = `${pill("whyimpact", "Why & Impact")}${pill("contact", "📞 Contact")}${pill("similar", "Similar Result")}`;
   } else {
     items = `${pill("whyimpact", "Why & Impact")}${pill("outstanding", "View Outstanding")}${pill("similar", "Similar Result")}${pill("contact", "📞 Contact")}`;
@@ -3607,9 +3659,11 @@ if (reportsView) {
       ".air-acc-header:not(.air-acc-header-wide), .air-acc-toggle",
     );
     const wideHeader = !toggle && e.target.closest(".air-acc-header-wide");
-    const isExcluded = wideHeader && e.target.closest(
-      ".air-main-prev, .air-main-next, .air-pills-toggle, .air-pills-menu, .air-tab, .air-btn",
-    );
+    const isExcluded =
+      wideHeader &&
+      e.target.closest(
+        ".air-main-prev, .air-main-next, .air-pills-toggle, .air-pills-menu, .air-tab, .air-btn",
+      );
     if (toggle || (wideHeader && !isExcluded)) {
       const item = (toggle || wideHeader).closest(".air-acc-item");
       if (item.classList.contains("locked")) return; // static cards are locked
@@ -3635,8 +3689,13 @@ if (reportsView) {
         if (isOpen) {
           const menu = drop.querySelector(".air-pills-menu");
           const rect = pillsToggle.getBoundingClientRect();
-          menu.style.top = (rect.bottom + 6) + "px";
-          menu.style.left = rect.left + "px";
+          menu.style.top = rect.bottom + 6 + "px";
+          const menuWidth = 170;
+          if (rect.right - menuWidth > 10) {
+            menu.style.left = rect.right - menuWidth + "px";
+          } else {
+            menu.style.left = rect.left + "px";
+          }
         }
       }
       return;
@@ -3645,6 +3704,33 @@ if (reportsView) {
     if (tab) {
       const drop = tab.closest(".air-pills-drop");
       if (drop) drop.classList.remove("open");
+      const item = tab.closest(".air-acc-item");
+      if (item && !item.classList.contains("open")) {
+        item.classList.add("open");
+        airHoverCard.classList.remove("visible");
+        hoverItem = null;
+        clearTimeout(hoverTimer);
+        const idx = Number(item.dataset.reportIndex);
+        const targetTab = tab.dataset.tab;
+        fillReportCard(idx).then(() => {
+          const scope = item.querySelector(".air-acc-card") || item;
+          scope
+            .querySelectorAll(".air-tab")
+            .forEach((t) => t.classList.remove("active"));
+          scope
+            .querySelectorAll(".air-tab-panel")
+            .forEach((p) => p.classList.remove("active"));
+          const activeTabBtn = item.querySelector(
+            `.air-tab[data-tab="${targetTab}"]`,
+          );
+          if (activeTabBtn) activeTabBtn.classList.add("active");
+          const panel = scope.querySelector(
+            `.air-tab-panel[data-panel="${targetTab}"]`,
+          );
+          if (panel) panel.classList.add("active");
+        });
+        return;
+      }
       const scope = tab.closest(".air-card, .air-acc-card, .air-acc-item");
       if (!scope) return;
       const wasActive = tab.classList.contains("active");
@@ -3661,6 +3747,14 @@ if (reportsView) {
         );
         if (panel) panel.classList.add("active");
       }
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".air-pills-drop")) {
+      document.querySelectorAll(".air-pills-drop.open").forEach((d) => {
+        d.classList.remove("open");
+      });
     }
   });
 
@@ -3691,45 +3785,166 @@ if (reportsView) {
         data._wideKind = cfg.wideKind || "customer";
         DYN_REPORT_DATA[i] = data;
         return data;
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     })();
     return _hoverFetching[i];
   }
 
-  function _buildHoverHtml(report, data, k) {
-    let html = `<div class="air-hprev-title">${escapeHtml(report?.title || "")}</div>`;
-    if (!data || !data.cards || !data.cards.length) {
-      html += `<div class="air-hprev-loading">Loading details…</div>`;
+  function _buildHoverHtml(ri, report, data, k) {
+    const heading = AIR_HEADINGS[ri] || report?.title || "";
+    const pri = AIR_PRI[report?.priority] || AIR_PRI.medium;
+    const isDynamic = Boolean(report?.dynamic);
+
+    if (isDynamic && (!data || !data.cards || !data.cards.length)) {
+      return `
+        <div class="air-hprev-top">
+          <div class="air-hprev-meta">
+            <span class="air-pri pri-${pri.cls}">${pri.dot} ${pri.label}</span>
+            <span class="air-hprev-cat">${escapeHtml(report?.category || "")}</span>
+            <span class="air-hprev-heading">${escapeHtml(heading)}</span>
+          </div>
+        </div>
+        <div class="air-hprev-loading"><span class="air-hprev-spinner"></span> Loading real-time details…</div>`;
+    }
+
+    if (isDynamic) {
+      const card = data.cards[k] || data.cards[0];
+      const headers = data.similar_headers || [];
+      const title = card.title || card.name || heading;
+      const why = card.why || "";
+      const impact = card.impact || "";
+      const action = card.action || "";
+
+      let html = `
+        <div class="air-hprev-top">
+          <div class="air-hprev-meta">
+            <span class="air-pri pri-${pri.cls}">${pri.dot} ${pri.label}</span>
+            <span class="air-hprev-cat">${escapeHtml(report?.category || "")}</span>
+            <span class="air-hprev-heading">${escapeHtml(heading)}</span>
+          </div>
+          <div class="air-hprev-title">${escapeHtml(title)}</div>
+        </div>`;
+
+      if (card.row && card.row.length > 0) {
+        const entityLabel =
+          headers[0] ||
+          (report?.category === "Invoice Collection" ? "Invoice" : "Item");
+        html += `
+          <div class="air-hprev-entity-bar">
+            <span class="air-hprev-entity-lbl">${escapeHtml(entityLabel)}:</span>
+            <span class="air-hprev-entity-val">${escapeHtml(String(card.row[0]))}</span>
+            ${card.customer && card.customer !== card.row[0] ? `<span class="air-hprev-entity-sub">(${escapeHtml(card.customer)})</span>` : ""}
+          </div>`;
+
+        if (card.row.length > 1) {
+          html += `<div class="air-hprev-grid">`;
+          card.row.slice(1).forEach((v, idx) => {
+            const label = headers[idx + 1] || "";
+            const strVal = String(v);
+            const isStatus =
+              strVal.includes("🔴") ||
+              strVal.includes("🟢") ||
+              strVal.includes("🟠");
+            html += `
+              <div class="air-hprev-cell ${isStatus ? "air-hprev-cell-status" : ""}">
+                <span class="air-hprev-label">${escapeHtml(label)}</span>
+                <span class="air-hprev-val">${escapeHtml(strVal)}</span>
+              </div>`;
+          });
+          html += `</div>`;
+        }
+      }
+
+      if (card.phone || card.email) {
+        html += `
+          <div class="air-hprev-contact">
+            ${card.phone ? `<span>📞 ${escapeHtml(card.phone)}</span>` : ""}
+            ${card.email ? `<span>✉️ ${escapeHtml(card.email)}</span>` : ""}
+          </div>`;
+      }
+
+      if (why || impact || action) {
+        html += `<div class="air-hprev-wi">`;
+        if (why)
+          html += `<div class="air-hprev-section"><span class="air-hprev-section-label lbl-why">Why</span><span class="air-hprev-section-text">${escapeHtml(why)}</span></div>`;
+        if (impact)
+          html += `<div class="air-hprev-section"><span class="air-hprev-section-label lbl-impact">Impact</span><span class="air-hprev-section-text">${escapeHtml(impact)}</span></div>`;
+        if (action)
+          html += `<div class="air-hprev-section"><span class="air-hprev-section-label lbl-action">Action</span><span class="air-hprev-section-text">${escapeHtml(action)}</span></div>`;
+        html += `</div>`;
+      }
+
+      const otherCount = data.cards.length - 1;
+      html += `
+        <div class="air-hprev-footer">
+          <span class="air-hprev-more">${otherCount > 0 ? `+${otherCount} more record${otherCount > 1 ? "s" : ""} • Click to view full report` : "Click to view full report"}</span>
+        </div>`;
       return html;
     }
-    const card = data.cards[k] || data.cards[0];
-    const headers = data.similar_headers || [];
-    html += `<div class="air-hprev-name">${escapeHtml(String(card.row[0]))}</div>`;
-    if (card.row.length > 1) {
-      html += `<div class="air-hprev-fields">`;
-      card.row.slice(1).forEach((v, idx) => {
-        const label = headers[idx + 1] || "";
-        html += `<div class="air-hprev-field"><span class="air-hprev-label">${escapeHtml(label)}</span><span class="air-hprev-val">${escapeHtml(String(v))}</span></div>`;
-      });
-      html += `</div>`;
+
+    // Static report
+    const title = report?.title || heading;
+    const problem = report?.problem || "";
+    const why = report?.why || "";
+    const impact = report?.impact || "";
+    const action = report?.action || "";
+
+    let html = `
+      <div class="air-hprev-top">
+        <div class="air-hprev-meta">
+          <span class="air-pri pri-${pri.cls}">${pri.dot} ${pri.label}</span>
+          <span class="air-hprev-cat">${escapeHtml(report?.category || "")}</span>
+          <span class="air-hprev-heading">${escapeHtml(heading)}</span>
+        </div>
+        <div class="air-hprev-title">${escapeHtml(title)}</div>
+      </div>`;
+
+    if (problem) {
+      html += `<div class="air-hprev-problem"><b>Problem:</b> ${escapeHtml(problem)}</div>`;
     }
-    if (card.why || card.impact) {
+
+    if (why || impact || action) {
       html += `<div class="air-hprev-wi">`;
-      if (card.why) html += `<div class="air-hprev-section"><span class="air-hprev-section-label">Why</span><span class="air-hprev-section-text">${escapeHtml(card.why)}</span></div>`;
-      if (card.impact) html += `<div class="air-hprev-section"><span class="air-hprev-section-label">Impact</span><span class="air-hprev-section-text">${escapeHtml(card.impact)}</span></div>`;
+      if (why)
+        html += `<div class="air-hprev-section"><span class="air-hprev-section-label lbl-why">Why</span><span class="air-hprev-section-text">${escapeHtml(why)}</span></div>`;
+      if (impact)
+        html += `<div class="air-hprev-section"><span class="air-hprev-section-label lbl-impact">Impact</span><span class="air-hprev-section-text">${escapeHtml(impact)}</span></div>`;
+      if (action)
+        html += `<div class="air-hprev-section"><span class="air-hprev-section-label lbl-action">Action</span><span class="air-hprev-section-text">${escapeHtml(action)}</span></div>`;
       html += `</div>`;
     }
-    if (data.cards.length > 1) {
-      html += `<div class="air-hprev-more">+${data.cards.length - 1} more — click to expand</div>`;
-    }
+
+    html += `
+      <div class="air-hprev-footer">
+        <span class="air-hprev-more">Click to view full report</span>
+      </div>`;
     return html;
   }
 
   function _positionHover(item) {
+    if (!item) return;
     const rect = item.getBoundingClientRect();
-    airHoverCard.style.top = (rect.bottom + 6) + "px";
-    airHoverCard.style.left = rect.left + "px";
-    airHoverCard.style.maxWidth = rect.width + "px";
+    const cardWidth = Math.min(580, Math.max(340, window.innerWidth - 32));
+    airHoverCard.style.width = cardWidth + "px";
+
+    const hoverHeight = airHoverCard.offsetHeight || 200;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    let left = rect.left;
+    if (left + cardWidth > window.innerWidth - 16) {
+      left = Math.max(16, window.innerWidth - cardWidth - 16);
+    }
+    if (left < 16) left = 16;
+
+    if (spaceBelow < hoverHeight + 16 && spaceAbove > spaceBelow) {
+      airHoverCard.style.top = Math.max(10, rect.top - hoverHeight - 8) + "px";
+    } else {
+      airHoverCard.style.top = rect.bottom + 6 + "px";
+    }
+    airHoverCard.style.left = left + "px";
   }
 
   reportsView.addEventListener("mouseover", (e) => {
@@ -3747,9 +3962,14 @@ if (reportsView) {
       const report = AIR_REPORTS[ri];
       const k = Number(item.dataset.dynIndex || 0);
 
-      // Show immediately with whatever we have (may be loading state)
+      // Show immediately with whatever we have (may be loading state or static)
       airHoverCard.dataset.hoverRi = ri;
-      airHoverCard.innerHTML = _buildHoverHtml(report, DYN_REPORT_DATA[ri], k);
+      airHoverCard.innerHTML = _buildHoverHtml(
+        ri,
+        report,
+        DYN_REPORT_DATA[ri],
+        k,
+      );
       _positionHover(item);
       airHoverCard.classList.add("visible");
 
@@ -3757,10 +3977,11 @@ if (reportsView) {
       if (!DYN_REPORT_DATA[ri] && report?.dynamic) {
         const data = await _prefetchForHover(ri);
         if (hoverItem === item && data) {
-          airHoverCard.innerHTML = _buildHoverHtml(report, data, k);
+          airHoverCard.innerHTML = _buildHoverHtml(ri, report, data, k);
+          _positionHover(item);
         }
       }
-    }, 250);
+    }, 200);
   });
 
   reportsView.addEventListener("mouseout", (e) => {
@@ -3778,14 +3999,18 @@ if (reportsView) {
     airHoverCard.classList.remove("visible");
   });
 
-  airHoverCard.addEventListener("click", (e) => {
-    if (!e.target.closest(".air-hprev-more")) return;
+  airHoverCard.addEventListener("click", () => {
+    const ri = airHoverCard.dataset.hoverRi;
+    if (ri === undefined || ri === "") return;
     airHoverCard.classList.remove("visible");
-    // Find the accordion item that was being hovered and open it
-    const activeItem = document.querySelector(`.air-acc-item[data-report-index="${airHoverCard.dataset.hoverRi}"]`);
+    hoverItem = null;
+    clearTimeout(hoverTimer);
+    const activeItem = document.querySelector(
+      `.air-acc-item[data-report-index="${ri}"]`,
+    );
     if (activeItem && !activeItem.classList.contains("open")) {
       activeItem.classList.add("open");
-      fillReportCard(Number(airHoverCard.dataset.hoverRi));
+      fillReportCard(Number(ri));
     }
   });
 }
