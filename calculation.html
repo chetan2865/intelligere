@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sales &amp; Purchase Forecasting — Calculation &amp; Implementation Reference</title>
+</head>
+<body>
+
+<h1>Sales &amp; Purchase Forecasting — Technical Reference</h1>
+
+<p>
+This document is a developer-facing specification of how the Forecasting module
+computes its numbers and how it talks to the OpenAI LLM. It is a static snapshot:
+all worked figures below were computed once (offline) from the live dataset and
+pasted here; the page does NOT call the model. This file is not linked anywhere
+in the application and is not served by Django.
+</p>
+
+<h2>0. Scope &amp; snapshot</h2>
+<ul>
+<li><b>Company (locked):</b> Testing_Plastic_comp — <code>companydata.id = 548</code>. Forecasting is enabled only for this company (constant <code>FORECAST_COMPANY_ID = '548'</code>).</li>
+<li><b>Data span:</b> Apr-2023 &rarr; Sep-2026 (42 monthly points). Last actual month = <b>Sep-2026</b>.</li>
+<li><b>Snapshot date of the figures below:</b> 2026-09-30.</li>
+<li><b>Two sides:</b> Sales (invoice doc_type <code>Invoice</code>) and Purchase (invoice doc_type <code>Purchase Invoice</code>).</li>
+<li><b>Two measures:</b> Revenue/Expenditure (sum of line <code>Amount</code>, ₹) and Product quantity (sum of line <code>quantity</code>, units).</li>
+<li><b>Two granularities:</b> Monthly and Yearly (Indian fiscal year, Apr&ndash;Mar).</li>
+</ul>
+
+<h2>1. Method names (for documentation)</h2>
+<ol>
+<li><b>Primary — LLM-based (zero-shot) time-series forecasting</b>, model <b>OpenAI <code>gpt-4.1-mini</code></b>, called through the Chat Completions API. The model extrapolates trend and seasonality from the supplied monthly history. Used only when <code>OPENAI_API_KEY</code> is configured.</li>
+<li><b>Fallback — Seasonal Naïve (SNaïve) with year-over-year growth adjustment</b> (a seasonal-naïve forecast scaled by a multiplicative YoY growth factor). Deterministic; used when no API key is set or the model call fails / returns unparseable JSON.</li>
+</ol>
+
+<h2>2. Data source &amp; aggregation</h2>
+<p>
+All series are built from <code>invoice.InvoiceData</code> line items joined to their
+parent <code>invoice.Invoice</code>, scoped to the company by the parent's
+<code>Seller_data</code> (which stores the owning company id). The month bucket is
+taken from the parent <code>Invoice_date</code>.
+</p>
+<table border="1" cellpadding="6" cellspacing="0">
+<tr><th>Series</th><th>doc_type</th><th>Field summed</th><th>Bucket</th></tr>
+<tr><td>Sales revenue</td><td>Invoice</td><td>Amount</td><td>(year, month) of Invoice_date</td></tr>
+<tr><td>Sales product qty</td><td>Invoice</td><td>quantity, grouped by Products</td><td>(year, month)</td></tr>
+<tr><td>Purchase expenditure</td><td>Purchase Invoice</td><td>Amount</td><td>(year, month)</td></tr>
+<tr><td>Purchase product qty</td><td>Purchase Invoice</td><td>quantity, grouped by Products</td><td>(year, month)</td></tr>
+</table>
+<p>For product forecasting, only the top <b>6</b> products by total quantity are forecast (<code>FORECAST_TOP_PRODUCTS = 6</code>).</p>
+
+<h2>3. The statistical (fallback) formula</h2>
+<p>Let <code>S[y,m]</code> be the monthly series (revenue or product qty).</p>
+<pre>
+YoY growth factor:
+    g = ( sum of the last 12 months )  /  ( sum of the previous 12 months )
+    g is clamped to the range [0.5, 2.0]
+    (if fewer than 24 months of history, g = 1.0)
+
+Monthly forecast for a future month (y, m):
+    baseline = S[y-1, m]                    # same calendar month, one year earlier
+                                            # (if that month is itself a forecast,
+                                            #  the already-forecast value is used;
+                                            #  if entirely missing, the mean of the
+                                            #  last 3 available months is used)
+    forecast[y, m] = max( baseline * g , 0 )
+
+Fiscal-year (Apr-Mar) total:
+    FY(f) = sum over the 12 months Apr(f) .. Mar(f+1) of:
+                actual value if the month is known, else the monthly forecast
+</pre>
+<p>
+The LLM path replaces only the "monthly forecast" step: instead of
+<code>baseline * g</code>, the model returns each future month's value directly.
+The YoY growth figure is still computed and shown for reference in the UI, and
+the fiscal-year aggregation is identical for both paths.
+</p>
+
+<h2>4. Worked calculations — SALES</h2>
+
+<h3>4.1 Monthly — Sales Revenue (₹)</h3>
+<pre>
+Last 12 months total  = 25,015,408  (₹2.50 Cr)
+Prev 12 months total  = 19,958,181  (₹2.00 Cr)
+YoY growth  g         = 25,015,408 / 19,958,181 = 1.2534
+
+Oct-26 = baseline 2,455,085 (Oct-25) × 1.2534 = 3,077,182   → ₹30.77 L
+Nov-26 = baseline 2,025,543 (Nov-25) × 1.2534 = 2,538,798   → ₹25.39 L
+</pre>
+
+<h3>4.2 Monthly — Sales Product qty (top product: Classic Pail 20L)</h3>
+<pre>
+Last 12 months total  = 52,050 units
+Prev 12 months total  = 46,900 units
+YoY growth  g         = 52,050 / 46,900 = 1.1098
+
+Oct-26 = baseline 5,700 (Oct-25) × 1.1098 = 6,326 units
+Nov-26 = baseline 4,350 (Nov-25) × 1.1098 = 4,828 units
+</pre>
+
+<h3>4.3 Yearly — Sales, FY 2026-27 (Apr-2026 .. Mar-2027)</h3>
+<pre>
+FY total = sum of Apr-2026..Sep-2026 (actual) + Oct-2026..Mar-2027 (forecast)
+
+Revenue           FY 2026-27 = 28,202,156        → ₹2.82 Cr
+Classic Pail 20L  FY 2026-27 = 55,031 units
+</pre>
+
+<h2>5. Worked calculations — PURCHASE</h2>
+
+<h3>5.1 Monthly — Purchase Expenditure (₹)</h3>
+<pre>
+Last 12 months total  = 16,895,239  (₹1.69 Cr)
+Prev 12 months total  = 14,684,964  (₹1.47 Cr)
+YoY growth  g         = 16,895,239 / 14,684,964 = 1.1505
+
+Oct-26 = baseline 1,714,789 (Oct-25) × 1.1505 = 1,972,887   → ₹19.73 L
+Nov-26 = baseline 1,139,044 (Nov-25) × 1.1505 = 1,310,484   → ₹13.10 L
+</pre>
+
+<h3>5.2 Monthly — Purchase Product qty (top product: BOPP Wrap Label 20L)</h3>
+<pre>
+Last 12 months total  = 100,000 units
+Prev 12 months total  = 80,000 units
+YoY growth  g         = 100,000 / 80,000 = 1.2500
+
+Oct-26 = baseline 10,000 (Oct-25) × 1.2500 = 12,500 units
+Nov-26 = baseline  5,000 (Nov-25) × 1.2500 =  6,250 units
+</pre>
+
+<h3>5.3 Yearly — Purchase, FY 2026-27</h3>
+<pre>
+Expenditure          FY 2026-27 = 18,221,660        → ₹1.82 Cr
+BOPP Wrap Label 20L  FY 2026-27 = 101,250 units
+</pre>
+
+<h2>6. LLM feeding &amp; response — how the model is called</h2>
+
+<p><b>Endpoint:</b> <code>POST https://api.openai.com/v1/chat/completions</code><br>
+<b>Model:</b> <code>gpt-4.1-mini</code> (<code>settings.OPENAI_MODEL</code>)<br>
+<b>Auth:</b> <code>Authorization: Bearer &lt;OPENAI_API_KEY&gt;</code><br>
+<b>Params:</b> <code>temperature = 0.2</code>, <code>response_format = {"type": "json_object"}</code>, request timeout 30s.</p>
+
+<h3>6.1 System prompt (verbatim)</h3>
+<pre>
+You are a demand-forecasting engine. Given monthly historical values, forecast
+the requested future months using trend and seasonality. Return ONLY JSON of the
+form {"&lt;series name&gt;": {"&lt;Mon-YY&gt;": &lt;number&gt;, ...}, ...} with a value for every
+requested future month and every series. Numbers only, no text.
+</pre>
+
+<h3>6.2 User message shape</h3>
+<pre>
+History (last 36 months): {"&lt;series name&gt;": {"Oct-23": 1234, "Nov-23": 987, ...}}
+Forecast these future months for every series: ["Oct-26", "Nov-26", ...]
+</pre>
+
+<h3>6.3 Example request body (Sales revenue, abbreviated history)</h3>
+<pre>
+{
+  "model": "gpt-4.1-mini",
+  "temperature": 0.2,
+  "response_format": {"type": "json_object"},
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a demand-forecasting engine. Given monthly historical values, forecast the requested future months using trend and seasonality. Return ONLY JSON ... Numbers only, no text."
+    },
+    {
+      "role": "user",
+      "content": "History (last 36 months): {\"revenue\": {\"...\": ..., \"Aug-26\": 1962968, \"Sep-26\": 2674259}}\nForecast these future months for every series: [\"Oct-26\", \"Nov-26\"]"
+    }
+  ]
+}
+</pre>
+
+<h3>6.4 Example model response (content is a JSON string)</h3>
+<pre>
+{
+  "id": "chatcmpl-...",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"revenue\": {\"Oct-26\": 3050000, \"Nov-26\": 2520000}}"
+      }
+    }
+  ]
+}
+</pre>
+<p>
+The server parses <code>choices[0].message.content</code> as JSON, maps each
+<code>"Mon-YY"</code> label back to its <code>(year, month)</code> key, coerces to a
+non-negative number, and if any series/month is missing or unparseable it discards
+the whole LLM result and uses the statistical fallback instead.
+</p>
+
+<h2>7. Source code (verbatim)</h2>
+
+<h3>7.1 Series aggregation — <code>_forecast_series_data</code></h3>
+<pre>
+def _forecast_series_data(company_id, doc_type='Invoice'):
+    """Monthly amount {(y,m): amount} and per-product monthly qty
+    {product: {(y,m): qty}} from invoice lines of the given doc_type
+    ('Invoice' = sales, 'Purchase Invoice' = purchase)."""
+    lines = InvoiceData.objects.filter(
+        doc_type=doc_type, Invoice_data__Seller_data=str(company_id)
+    ).values_list('Products', 'Amount', 'quantity', 'Invoice_data__Invoice_date')
+    revenue = defaultdict(float)
+    product = defaultdict(lambda: defaultdict(float))
+    totals = defaultdict(float)
+    for name, amount, qty, idate in lines:
+        if not idate:
+            continue
+        ym = (idate.year, idate.month)
+        revenue[ym] += _to_number(amount) or 0.0
+        pname = (name or '').strip()
+        if pname:
+            q = _to_number(qty) or 0.0
+            product[pname][ym] += q
+            totals[pname] += q
+    return revenue, product, totals
+</pre>
+
+<h3>7.2 Year-over-year growth — <code>_series_growth</code></h3>
+<pre>
+def _series_growth(series):
+    """Year-over-year growth = last 12 periods total / previous 12 periods total.
+    Returns (growth, last12_total, prev12_total)."""
+    vals = [series[k] for k in sorted(series)]
+    if len(vals) &gt;= 24 and sum(vals[-24:-12]) &gt; 0:
+        cur, prev = sum(vals[-12:]), sum(vals[-24:-12])
+        return min(max(cur / prev, 0.5), 2.0), cur, prev
+    return 1.0, (sum(vals[-12:]) if vals else 0.0), 0.0
+</pre>
+
+<h3>7.3 Statistical fallback — <code>_stat_forecast</code></h3>
+<pre>
+def _stat_forecast(series, future_keys):
+    """Seasonal-with-growth fallback: each future month = the same calendar month
+    a year earlier (actual or already-forecast) scaled by recent YoY growth."""
+    past = sorted(series)
+    vals = [series[k] for k in past]
+    growth = 1.0
+    if len(vals) &gt;= 24 and sum(vals[-24:-12]) &gt; 0:
+        growth = min(max(sum(vals[-12:]) / sum(vals[-24:-12]), 0.5), 2.0)
+    recent = (sum(vals[-3:]) / len(vals[-3:])) if vals else 0.0
+    out = {}
+    combined = dict(series)
+    for (y, m) in future_keys:
+        base = combined.get((y - 1, m))
+        if base is None:
+            base = recent
+        val = max(base * growth, 0.0)
+        out[(y, m)] = val
+        combined[(y, m)] = val
+    return out
+</pre>
+
+<h3>7.4 LLM call + response parsing — <code>_openai_forecast</code></h3>
+<pre>
+def _openai_forecast(series_map, past_keys, future_keys):
+    """Ask OpenAI to forecast each named series over future_keys. Returns
+    {name: {(y,m): value}} or None if unavailable/unparseable."""
+    api_key = getattr(settings, 'OPENAI_API_KEY', '')
+    if not api_key:
+        return None
+    past_labels = [_month_label(*k) for k in past_keys]
+    future_labels = [_month_label(*k) for k in future_keys]
+    hist = {name: {_month_label(*k): round(series.get(k, 0.0))
+                   for k in past_keys}
+            for name, series in series_map.items()}
+    system = (
+        "You are a demand-forecasting engine. Given monthly historical values, "
+        "forecast the requested future months using trend and seasonality. "
+        "Return ONLY JSON of the form "
+        '{"&lt;series name&gt;": {"&lt;Mon-YY&gt;": &lt;number&gt;, ...}, ...} with a value for '
+        "every requested future month and every series. Numbers only, no text."
+    )
+    user = (
+        f"History (last {len(past_labels)} months): {json.dumps(hist)}\n"
+        f"Forecast these future months for every series: {future_labels}"
+    )
+    body = json.dumps({
+        'model': getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini'),
+        'messages': [
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': user},
+        ],
+        'temperature': 0.2,
+        'response_format': {'type': 'json_object'},
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        OPENAI_URL, data=body,
+        headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        parsed = json.loads(data['choices'][0]['message']['content'])
+    except (urllib.error.URLError, KeyError, ValueError, TimeoutError):
+        return None
+    label_to_key = {_month_label(*k): k for k in future_keys}
+    out = {}
+    for name in series_map:
+        per = parsed.get(name) or {}
+        if not isinstance(per, dict):
+            return None
+        out[name] = {}
+        for lbl, key in label_to_key.items():
+            v = _to_number(per.get(lbl))
+            out[name][key] = max(v, 0.0) if v is not None else None
+    return out
+</pre>
+
+<h3>7.5 Orchestration (how a request selects LLM vs fallback)</h3>
+<pre>
+# 1. Build the monthly series for the requested side (doc_type) and company 548.
+revenue, product, totals = _forecast_series_data(company_id, doc_type=doc_type)
+
+# 2. Choose series to forecast: {'revenue': ...} or top-6 products.
+# 3. Try the LLM over the requested future months:
+ai = _openai_forecast(series_map, past_keys, future_months)   # None if no key / failure
+used_ai = ai is not None
+
+# 4. Per series: use the LLM values, else the statistical fallback.
+for name, series in series_map.items():
+    fc = ai.get(name) if ai else None
+    if not fc or any(v is None for v in fc.values()):
+        fc = _stat_forecast(series, future_months)
+    forecasts[name] = fc
+
+# 5. Monthly view returns the requested horizon directly; yearly view sums the
+#    12 months of each fiscal year (actual where known, forecast otherwise).
+</pre>
+
+<h2>8. Notes / assumptions</h2>
+<ul>
+<li>Fiscal year is Indian (Apr&ndash;Mar). "FY 2026-27" = Apr-2026 &hellip; Mar-2027.</li>
+<li>The growth factor is intentionally clamped to [0.5, 2.0] to stop a single anomalous year from producing extreme forecasts.</li>
+<li>When the same calendar month one year earlier is itself a forecast (e.g. forecasting 13&ndash;24 months out), that forecast value becomes the next baseline — so growth compounds year over year.</li>
+<li>Currency is shown as ₹ Lakh / Crore in the UI; raw values are plain rupees.</li>
+<li>All numbers in sections 4 and 5 are a static snapshot (data through Sep-2026, computed 2026-09-30). Re-run the offline computation to refresh them.</li>
+</ul>
+
+</body>
+</html>

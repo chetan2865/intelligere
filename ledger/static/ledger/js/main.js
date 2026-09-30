@@ -3411,15 +3411,16 @@ function renderWideBody(data, k) {
       <div class="air-tab-panel" data-panel="invoices">${invoiceTable("Invoices")}</div>
       ${similarPanel}`;
   } else if (data._wideKind === "delivery") {
-    // Each delivery time = challan received minus the order date before it.
-    const delRows = (c.deliveries || []).map((d, i) => [
-      `Delivery ${i + 1}`,
-      `${d} days`,
+    // Each delivery time = challan received minus the order date before it;
+    // labelled with the actual Inbound Challan invoice number.
+    const delRows = (c.deliveries || []).map((d) => [
+      d.invoice_no || "—",
+      `${d.days} days`,
     ]);
     const deliveriesPanel = delRows.length
       ? renderAirSimilar({
           title: `Delivery Times — ${c.name} (${c.delivery_count} received, avg ${c.avg_days} days)`,
-          headers: ["Delivery", "Days Taken"],
+          headers: ["Invoice", "Days Taken"],
           rows: delRows,
         })
       : `<div class="air-empty">No matched deliveries.</div>`;

@@ -1651,7 +1651,8 @@ def report_vendor_delivery_api(request):
             pk=company_id
         ).values_list('comp_name', flat=True).first()
 
-    def dates_by_supplier(doc_type):
+    def entries_by_supplier(doc_type):
+        """party -> list of (date, doc_no)."""
         qs = Invoice.objects.filter(doc_type=doc_type)
         if company_id:
             qs = qs.filter(Seller_data=str(company_id))
@@ -1660,26 +1661,28 @@ def report_vendor_delivery_api(request):
             party = _delivery_party(inv)
             d = inv.doc_date or inv.Invoice_date
             if party and d:
-                out[party].append(d)
+                out[party].append((d, inv.doc_no or inv.Invoice_no or f'#{inv.pk}'))
         return out
 
-    orders = dates_by_supplier(VENDOR_DELIVERY_ORDER_TYPE)
-    receipts = dates_by_supplier(VENDOR_DELIVERY_RECEIPT_TYPE)
+    orders = entries_by_supplier(VENDOR_DELIVERY_ORDER_TYPE)
+    receipts = entries_by_supplier(VENDOR_DELIVERY_RECEIPT_TYPE)
 
     suppliers = {}
     for party in set(orders) & set(receipts):
-        order_dates = sorted(orders[party])
-        # One delivery time per receipt: challan date minus the most recent
-        # order to this supplier on/before that challan.
-        times = []
-        for challan in sorted(receipts[party]):
-            prior = [o for o in order_dates if o <= challan]
+        order_dates = sorted(d for d, _ in orders[party])
+        # One delivery time per receipt (Inbound Challan): challan date minus the
+        # most recent order to this supplier on/before that challan. Each delivery
+        # keeps its challan invoice number.
+        deliveries = []  # list of {invoice_no, days}
+        for challan_date, challan_no in sorted(receipts[party], key=lambda x: x[0]):
+            prior = [o for o in order_dates if o <= challan_date]
             if prior:
-                days = (challan - prior[-1]).days
+                days = (challan_date - prior[-1]).days
                 if days >= 0:
-                    times.append(days)
-        if not times:
+                    deliveries.append({'invoice_no': challan_no, 'days': days})
+        if not deliveries:
             continue
+        times = [d['days'] for d in deliveries]
         avg = round(sum(times) / len(times))
         half = len(times) // 2 or 1
         baseline = round(sum(times[:half]) / len(times[:half]))
@@ -1688,7 +1691,7 @@ def report_vendor_delivery_api(request):
         increase = max(recent - baseline, 0)
         suppliers[party] = {
             'avg': avg, 'baseline': baseline, 'recent': recent,
-            'increase': increase, 'count': len(times), 'times': times,
+            'increase': increase, 'count': len(times), 'deliveries': deliveries,
         }
 
     if not suppliers:
@@ -1722,7 +1725,7 @@ def report_vendor_delivery_api(request):
             'why': why,
             'impact': 'Production/selling may stop due to late material.',
             'action': f"Start purchasing from a reliable alternative of {party}.",
-            'deliveries': s['times'],
+            'deliveries': s['deliveries'],
             'delivery_count': s['count'],
             'avg_days': s['avg'],
             'row': [
@@ -1825,16 +1828,15 @@ def report_immediate_collection_api(request):
 # Report 11 — High-Value Overdue Receivable (party-wise).
 #
 # Live from recPay.rec_data. Unlike report 10 (one row per overdue invoice),
-# this groups every open receivable by customer and picks the ones worth
-# chasing first by blending TWO things: how much they owe (value) and how long
-# it has sat unpaid. The overdue figure is amount-weighted — an amount-weighted
-# mean of each invoice's overdue days — so a big old invoice pulls it up more
-# than a small one. The priority score weights value 60% and overdue 40%
-# (the "60% up = high value" rule), and the risk tier is read off that score.
+# this groups every open receivable by customer and keeps those past due. The
+# overdue figure is amount-weighted — an amount-weighted mean of each invoice's
+# overdue days — so a big old invoice pulls it up more than a small one.
+# "60% up = high value": only the HIGH-VALUE customers show — the top 60% by
+# outstanding (the bottom 40% are dropped). Among those shown, the risk tier is
+# purely RANK-based: #1 Critical, next two High, the rest Medium.
 # ---------------------------------------------------------------------------
 
-HIGH_VALUE_VALUE_WEIGHT = 0.6   # value counts for 60% of the priority score
-HIGH_VALUE_OVERDUE_WEIGHT = 0.4  # weighted overdue days for the remaining 40%
+HIGH_VALUE_TOP_FRACTION = 0.60   # keep only the top 60% of debtors by outstanding
 
 
 def report_high_value_overdue_api(request):
@@ -1879,21 +1881,18 @@ def report_high_value_overdue_api(request):
     if not parties:
         return JsonResponse({'found': False, 'company_name': company_name})
 
-    max_value = max(p[1] for p in parties) or 1.0
-    max_overdue = max(p[2] for p in parties) or 1
+    # Rank value-first (biggest debtors), overdue days as the tie-breaker, then
+    # keep only the high-value top 60% (drop the bottom 40%).
+    parties.sort(key=lambda p: (p[1], p[2]), reverse=True)
+    keep = max(1, round(len(parties) * HIGH_VALUE_TOP_FRACTION))
+    parties = parties[:keep]
 
-    def score(value, overdue):
-        return (HIGH_VALUE_VALUE_WEIGHT * (value / max_value)
-                + HIGH_VALUE_OVERDUE_WEIGHT * (overdue / max_overdue))
-
-    def risk(s):
-        if s >= 0.66:
+    def risk(rank):
+        if rank == 0:
             return '🔴 Critical'
-        if s >= 0.33:
+        if rank <= 2:
             return '🟠 High'
         return '🟡 Medium'
-
-    parties.sort(key=lambda p: score(p[1], p[2]), reverse=True)
 
     # Phone/email per customer for the Contact panel.
     contacts = {}
@@ -1905,7 +1904,7 @@ def report_high_value_overdue_api(request):
                 contacts[name.strip()] = {'phone': phone or '', 'email': email or ''}
 
     cards = []
-    for party, value, overdue in parties[:5]:
+    for rank, (party, value, overdue) in enumerate(parties[:5]):
         amt = _inr(value)
         info = contacts.get((party or '').strip(), {})
         invoices = sorted(details.get(party, []), key=lambda x: x['amount'], reverse=True)[:5]
@@ -1924,7 +1923,7 @@ def report_high_value_overdue_api(request):
             'email': info.get('email', ''),
             'invoice_count': len(details.get(party, [])),
             'outstanding': outstanding,
-            'row': [party, amt, f"{overdue} days", risk(score(value, overdue))],
+            'row': [party, amt, f"{overdue} days", risk(rank)],
         })
 
     return JsonResponse({
@@ -2246,7 +2245,7 @@ def report_purchase_timing_api(request):
             return '🔴 Order urgently'
         if gap <= 0:
             return '🟠 Order today'
-        return f'🟡 Order in {gap} days'
+        return f'Order in {gap} days'
 
     cards = []
     for m in items[:5]:
@@ -2318,6 +2317,41 @@ def report_purchase_timing_api(request):
 # Open PO qty is the total quantity on Outbound Purchase Order lines per product.
 # ---------------------------------------------------------------------------
 
+def _product_ref_leads(company_id):
+    """Per-product supplier lead time (days), computed the spec's way: the average
+    of (Inbound Challan date − its Outbound PO date), where each challan line is
+    tied to its originating PO by ref_doc_no. Returns ({product: avg_lead}, company_avg)."""
+    oqs = Invoice.objects.filter(doc_type='Outbound Purchase Order')
+    iqs = Invoice.objects.filter(doc_type='Inbound Challan')
+    if company_id:
+        oqs = oqs.filter(Seller_data=str(company_id))
+        iqs = iqs.filter(Seller_data=str(company_id))
+    opo_date = {inv.doc_no: (inv.doc_date or inv.Invoice_date) for inv in oqs}
+    ich_date = {inv.doc_no: (inv.doc_date or inv.Invoice_date) for inv in iqs}
+
+    cl = InvoiceData.objects.filter(doc_type='Inbound Challan')
+    if company_id:
+        cl = cl.filter(Invoice_data__Seller_data=str(company_id))
+    per_product = defaultdict(list)
+    all_leads = []
+    for product, ref, cdocno in cl.values_list(
+        'Products', 'ref_doc_no', 'Invoice_data__doc_no'
+    ):
+        ref = (ref or '').strip()
+        od = opo_date.get(ref)
+        cd = ich_date.get(cdocno)
+        if od and cd:
+            days = (cd - od).days
+            if days >= 0:
+                all_leads.append(days)
+                p = (product or '').strip()
+                if p:
+                    per_product[p].append(days)
+    avg_map = {p: sum(v) / len(v) for p, v in per_product.items()}
+    company_avg = (sum(all_leads) / len(all_leads)) if all_leads else None
+    return avg_map, company_avg
+
+
 def report_open_po_api(request):
     company_id = request.GET.get('company_id') or None
     company_name = None
@@ -2326,10 +2360,9 @@ def report_open_po_api(request):
             pk=company_id
         ).values_list('comp_name', flat=True).first()
 
-    per_supplier, company_avg = _supplier_lead_times(company_id)
+    lead_by_product, company_avg = _product_ref_leads(company_id)
     if company_avg is None:
         return JsonResponse({'found': False, 'company_name': company_name})
-    per_supplier_upper = {k.upper(): v for k, v in per_supplier.items()}
 
     today = timezone.localdate()
     since = today - timedelta(days=30)
@@ -2397,9 +2430,9 @@ def report_open_po_api(request):
         avg_daily = sold_total / 30.0
         if avg_daily <= 0:
             continue
-        matched = [per_supplier_upper[n.upper()] for n in vendors_by_name[name]
-                   if n.upper() in per_supplier_upper]
-        lead = round(sum(matched) / len(matched)) if matched else round(company_avg)
+        # Lead time = per-product average of (challan date − its PO date), via
+        # ref_doc_no; kept as a float (the requirement is rounded, not the lead).
+        lead = lead_by_product.get(name, company_avg)
         min_qty = minq_by_name[name]
         requirement = round(avg_daily * lead + min_qty)
         stock = stock_by_name[name]
@@ -2452,7 +2485,7 @@ def report_open_po_api(request):
                 ['Open PO', f"{_fmt_units(m['po'])} units"],
                 ['Available Supply', f"{_fmt_units(m['supply'])} units"],
                 ['Avg Daily Consumption', f"{m['avg_daily']:.2f} / day"],
-                ['Supplier Lead Time', f"{m['lead']} days"],
+                ['Supplier Lead Time', f"{m['lead']:.1f} days"],
                 ['Minimum Qty', _fmt_units(m['min_qty'])],
                 ['Upcoming Requirement', f"{_fmt_units(m['requirement'])} units"],
                 ['Days of Cover', f"{m['cover_days']} days"],
@@ -2462,7 +2495,7 @@ def report_open_po_api(request):
                 ['Avg Daily Consumption',
                  f"{_fmt_units(m['sold'])} sold in 30 days ÷ 30 = {m['avg_daily']:.2f} / day"],
                 ['Upcoming Requirement',
-                 f"({m['avg_daily']:.2f} / day × {m['lead']} days lead) + {_fmt_units(m['min_qty'])} min = {_fmt_units(m['requirement'])} units"],
+                 f"({m['avg_daily']:.2f} / day × {m['lead']:.1f} days lead) + {_fmt_units(m['min_qty'])} min = {_fmt_units(m['requirement'])} units"],
                 ['Open PO',
                  f"{_fmt_units(m['ordered'])} ordered − {_fmt_units(m['received'])} received = {_fmt_units(m['po'])} units"],
                 ['Available Supply',
